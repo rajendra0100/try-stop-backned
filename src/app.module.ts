@@ -58,12 +58,19 @@ import { PolicyModule } from './policy/policy.module';
       isGlobal: true,
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => {
-        const redisUrl = configService.get<string>('REDIS_URL', 'redis://localhost:6379');
-        const store = await redisStore({
-          url: redisUrl,
-          ttl: 30000, // 30 seconds default TTL
-        });
-        return { store };
+        const redisUrl = configService.get<string>('REDIS_URL');
+        if (redisUrl && redisUrl.startsWith('redis')) {
+          try {
+            const store = await redisStore({
+              url: redisUrl,
+              ttl: 30000,
+              maxRetriesPerRequest: 1,
+              retryStrategy: (times: number) => (times > 3 ? null : 500),
+            });
+            return { store };
+          } catch (_) {}
+        }
+        return { ttl: 30000 };
       },
       inject: [ConfigService],
     }),
@@ -71,9 +78,26 @@ import { PolicyModule } from './policy/policy.module';
     BullModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => {
-        const redisUrl = configService.get<string>('REDIS_URL', 'redis://localhost:6379');
+        const redisUrl = configService.get<string>('REDIS_URL');
+        if (redisUrl && redisUrl.startsWith('redis')) {
+          return {
+            url: redisUrl,
+            redis: {
+              maxRetriesPerRequest: 1,
+              enableReadyCheck: false,
+              retryStrategy: (times: number) => (times > 3 ? null : 1000),
+            },
+          };
+        }
         return {
-          redis: redisUrl,
+          redis: {
+            host: '127.0.0.1',
+            port: 6379,
+            maxRetriesPerRequest: 1,
+            enableReadyCheck: false,
+            retryStrategy: () => null,
+            lazyConnect: true,
+          },
         };
       },
       inject: [ConfigService],

@@ -1,46 +1,65 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
-import { NestExpressApplication } from '@nestjs/platform-express';
+import { NestExpressApplication, ExpressAdapter } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
+import express, { Express } from 'express';
 
-async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
-  const logger = new Logger('Bootstrap');
+let cachedServer: Express;
 
-  // Enable trust proxy so that NestJS rate limiting (Throttler) resolves the correct user client IP behind ngrok/proxies
+async function createNestServer(expressInstance?: Express): Promise<NestExpressApplication> {
+  const app = expressInstance
+    ? await NestFactory.create<NestExpressApplication>(AppModule, new ExpressAdapter(expressInstance))
+    : await NestFactory.create<NestExpressApplication>(AppModule);
+
+  // Enable trust proxy so that NestJS rate limiting (Throttler) resolves the correct user client IP behind ngrok/proxies/Vercel
   app.set('trust proxy', true);
 
   // ── Global Validation ──────────────────────────────────────────────────────
-  // Strips unknown fields and transforms request payloads automatically.
   app.useGlobalPipes(
     new ValidationPipe({
-      whitelist: true,          // Strip unknown properties silently
-      forbidNonWhitelisted: true, // Throw if unknown properties are present
-      transform: true,          // Auto-transform payloads to DTO class instances
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
       transformOptions: {
-        enableImplicitConversion: true, // Convert primitives automatically
+        enableImplicitConversion: true,
       },
     }),
   );
 
   // ── Global Error Handling ─────────────────────────────────────────────────
-  // Catches ALL errors and returns a consistent error response envelope.
   app.useGlobalFilters(new HttpExceptionFilter());
 
   // ── Global Response Wrapping ──────────────────────────────────────────────
-  // Wraps every successful response in { success, statusCode, data, timestamp }
   app.useGlobalInterceptors(new ResponseInterceptor());
 
   // ── CORS ───────────────────────────────────────────────────────────────────
-  // Configure appropriately for production (restrict origins)
   app.enableCors();
 
+  return app;
+}
+
+async function bootstrap() {
+  const logger = new Logger('Bootstrap');
+  const app = await createNestServer();
   const port = process.env.PORT ?? 4000;
   await app.listen(port);
-
   logger.log(`🚀 Application running on port ${port} [${process.env.NODE_ENV ?? 'development'}]`);
 }
 
-bootstrap();
+// Export default serverless handler for Vercel
+export default async function handler(req: any, res: any) {
+  if (!cachedServer) {
+    const server = express();
+    const app = await createNestServer(server);
+    await app.init();
+    cachedServer = server;
+  }
+  return cachedServer(req, res);
+}
+
+// Standalone server mode when NOT running on Vercel
+if (!process.env.VERCEL) {
+  bootstrap();
+}
