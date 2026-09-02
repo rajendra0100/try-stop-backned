@@ -22,6 +22,7 @@ export class CashfreeService {
 
     this.pgClient = axios.create({
       baseURL: pgBaseUrl,
+      timeout: 6000,
       headers: {
         "x-client-id": this.configService.get<string>("CASHFREE_CLIENT_ID"),
         "x-client-secret": this.configService.get<string>("CASHFREE_CLIENT_SECRET"),
@@ -32,6 +33,7 @@ export class CashfreeService {
 
     this.payoutClient = axios.create({
       baseURL: payoutBaseUrl,
+      timeout: 6000,
       headers: {
         "x-client-id": this.configService.get<string>("CASHFREE_PAYOUT_CLIENT_ID"),
         "x-client-secret": this.configService.get<string>("CASHFREE_PAYOUT_CLIENT_SECRET"),
