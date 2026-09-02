@@ -198,7 +198,7 @@ export class PaymentService {
     // 9. Create Cashfree order for online payment portion
     const webhookUrl = this.configService.get<string>(
       'CASHFREE_WEBHOOK_URL',
-      'https://try-stop-backned.vercel.app/payments/webhook',
+      'https://try-stop-backned-o2iu.vercel.app',
     );
     const cashfreeOrder = await this.cashfreeService.createOrder({
       orderId,
