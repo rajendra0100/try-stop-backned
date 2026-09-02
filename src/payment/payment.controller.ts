@@ -1,6 +1,6 @@
 import {
   Controller, Post, Patch, Get, Body, Param, Query, Req,
-  UseGuards, Headers, RawBodyRequest,
+  UseGuards, Headers, RawBodyRequest, HttpCode, HttpStatus,
 } from '@nestjs/common';
 import { Throttle, SkipThrottle } from '@nestjs/throttler';
 import { PaymentService } from './payment.service';
@@ -49,10 +49,22 @@ export class PaymentController {
   }
 
   /**
+   * GET /payments/webhook
+   * Cashfree PG health/validation ping (responds 200 OK).
+   */
+  @Get("payments/webhook")
+  @HttpCode(HttpStatus.OK)
+  @SkipThrottle()
+  async handleWebhookGet() {
+    return { status: "ok", message: "Cashfree webhook endpoint is active" };
+  }
+
+  /**
    * POST /payments/webhook
    * Cashfree PG webhook handler (idempotent, signature verified).
    */
   @Post("payments/webhook")
+  @HttpCode(HttpStatus.OK)
   @SkipThrottle()
   async handleWebhook(
     @Body() body: any,
