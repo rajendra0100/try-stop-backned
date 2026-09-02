@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Trystop System Documentation - Payments, Wallet, Reviews, Ranking & Ads</title>
+  <style>
+    :root {
+      --primary: #0F172A;
+      --primary-light: #1E293B;
+      --accent: #2563EB;
+      --accent-light: #EFF6FF;
+      --text: #334155;
+      --text-dark: #0F172A;
+      --bg-light: #F8FAFC;
+      --border: #E2E8F0;
+      --code-bg: #1E293B;
+      --code-text: #F8FAFC;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: var(--text);
+      line-height: 1.6;
+      margin: 0;
+      padding: 0;
+      background-color: #FFFFFF;
+    }
+
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 40px 20px;
+    }
+
+    header {
+      border-bottom: 2px solid var(--border);
+      padding-bottom: 20px;
+      margin-bottom: 40px;
+      text-align: center;
+    }
+
+    h1 {
+      color: var(--primary);
+      font-size: 2.5rem;
+      margin-bottom: 10px;
+    }
+
+    h2 {
+      color: var(--primary);
+      font-size: 1.8rem;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 8px;
+      margin-top: 40px;
+      margin-bottom: 20px;
+      page-break-after: avoid;
+    }
+
+    h3 {
+      color: var(--primary-light);
+      font-size: 1.3rem;
+      margin-top: 30px;
+      margin-bottom: 15px;
+      page-break-after: avoid;
+    }
+
+    p {
+      margin-bottom: 20px;
+    }
+
+    ul, ol {
+      margin-bottom: 20px;
+      padding-left: 24px;
+    }
+
+    li {
+      margin-bottom: 8px;
+    }
+
+    /* Code Highlighting */
+    pre {
+      background-color: var(--code-bg);
+      color: var(--code-text);
+      padding: 16px;
+      border-radius: 8px;
+      overflow-x: auto;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
+      font-size: 0.9rem;
+      margin-bottom: 24px;
+    }
+
+    code {
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
+      background-color: var(--bg-light);
+      color: #D97706;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.9em;
+    }
+
+    pre code {
+      background-color: transparent;
+      color: inherit;
+      padding: 0;
+      font-size: inherit;
+    }
+
+    /* Custom Tables */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 30px;
+      font-size: 0.95rem;
+    }
+
+    th, td {
+      border: 1px solid var(--border);
+      padding: 12px 16px;
+      text-align: left;
+    }
+
+    th {
+      background-color: var(--bg-light);
+      color: var(--text-dark);
+      font-weight: 600;
+    }
+
+    tr:nth-child(even) {
+      background-color: var(--bg-light);
+    }
+
+    /* Callout Box */
+    .callout {
+      background-color: var(--accent-light);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 8px 8px 0;
+      margin-bottom: 24px;
+    }
+
+    .callout-title {
+      font-weight: 700;
+      color: var(--accent);
+      margin-bottom: 6px;
+    }
+
+    .callout p:last-child {
+      margin-bottom: 0;
+    }
+
+    /* Mermaid Diagrams Placeholder styling */
+    .diagram-box {
+      border: 1px solid var(--border);
+      background-color: var(--bg-light);
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 30px;
+      text-align: center;
+    }
+
+    .diagram-title {
+      font-weight: bold;
+      color: var(--primary-light);
+      margin-bottom: 12px;
+      font-size: 0.95rem;
+    }
+
+    .diagram-content {
+      font-family: monospace;
+      text-align: left;
+      white-space: pre;
+      overflow-x: auto;
+      font-size: 0.85rem;
+      background: #FFFFFF;
+      padding: 15px;
+      border-radius: 6px;
+      border: 1px solid #E2E8F0;
+    }
+
+    /* Page breaks for printing */
+    @media print {
+      body {
+        font-size: 11pt;
+      }
+      .container {
+        padding: 0;
+      }
+      h2, h3 {
+        page-break-after: avoid;
+      }
+      pre, table, .callout, .diagram-box {
+        page-break-inside: avoid;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Trystop Backend Documentation</h1>
+      <p><strong>Payments, Wallet, Offers, Reviews, Rankings & Ads</strong></p>
+      <p><em>Comprehensive Architecture & Client Integration Guide</em></p>
+    </header>
+
+    <h2>1. System Architecture & Core Libraries</h2>
+    <p>This backend implementation introduces modular services to handle local wallet balances, verified purchase reviews, Rolling 30-day seller visibility rankings, proximity-based ad serving, and nightly batch settlements. All business logic is isolated, tested, and wrapped with strict DTO validation rules.</p>
+    
+    <p>The following core libraries and technologies are used to drive the modules:</p>
+    <ul>
+      <li><strong><code>axios</code></strong>: Used for executing secure, typed HTTPS requests to Cashfree PG and Payouts sandboxes. Base URLs are environment-controlled to enable instant swapping between Sandbox and Production via environment configuration alone.</li>
+      <li><strong><code>firebase-admin</code></strong>: Powering client push alerts (with custom louder notification channels/sounds) for verified transaction confirmations.</li>
+      <li><strong><code>bullmq</code> &amp; <code>@nestjs/bull</code></strong>: Decouples side-effects (wallet calculations, push alerts, coupon counts) from the main HTTP response threads to guarantee high concurrency and ultra-low response latency.</li>
+      <li><strong><code>@nestjs/schedule</code></strong>: Used to bootstrap repeatable scheduling jobs mapped directly inside Redis.</li>
+      <li><strong><code>mongoose</code> &amp; <code>@nestjs/mongoose</code></strong>: Handles all MongoDB ledger writes, platform settings, reviews, and coupon usage records.</li>
+    </ul>
+
+    <div class="diagram-box">
+      <div class="diagram-title">Distributed Message Flow & Task Queues</div>
+      <div class="diagram-content">
+[Client App] ---> [HTTP Controllers] 
+                       |
+                       +---> (Atomically saves local state & updates DB cached balance)
+                       |
+                       +---> [Redis / BullMQ Queue]
+                                   |
+                                   +---> [Background Workers]
+                                               |
+                                               +---> (Trigger Cashfree API calls)
+                                               +---> (Send push alerts via FCM)
+      </div>
+    </div>
+
+    <h2>2. Seller Onboarding & Payout Vendor Registration</h2>
+    <p>Before a merchant can receive daily bulk payouts, they must be registered as a Cashfree Vendor. This process maps KYC details and initiates automated bank details verification.</p>
+
+    <h3>Vendor Onboarding Endpoint</h3>
+    <pre>POST /sellers/:id/cashfree-vendor</pre>
+    <ul>
+      <li><strong>Access Control</strong>: Superadmin or Subadmin with <code>manage_sellers</code> permission.</li>
+      <li><strong>Request Body</strong>:
+        <pre>{
+  "businessType": "individual" // Optional override: individual, sole_proprietorship, partnership, llc
+}</pre>
+      </li>
+      <li><strong>Operations & Logic Flow</strong>:
+        <ol>
+          <li>Retrieves the seller's profile, including their registered PAN, bank account number, IFSC code, and legal account holder name from the DB.</li>
+          <li>Submits a registration request to Cashfree's **Vendor Management API**.</li>
+          <li>Includes the option <code>verify_account: true</code>. Cashfree automatically initiates a **Penny-Drop transaction** (crediting ₹1 to the account) to verify bank details directly with the node bank.</li>
+          <li>Saves the returned <code>cashfreeVendorId</code> and sets <code>cashfreeVendorStatus</code> to <code>pending</code>. Once penny-drop success is validated, the vendor is cleared for nightly payout settlements.</li>
+        </ol>
+      </li>
+    </ul>
+
+    <h2>3. Shop & Product Browsing APIs (Customer Flow)</h2>
+    <p>To enable customers to explore shops, view category structures, and filter products locally, the backend exposes three public endpoints:</p>
+
+    <h3>A. List All Shops (Sorted by Ranking Score)</h3>
+    <pre>GET /sellers/ranked?page=1&amp;limit=20</pre>
+    <ul>
+      <li><strong>Access</strong>: Public (no authentication required).</li>
+      <li><strong>Logic</strong>: Retrieves all verified and approved sellers sorted by their cached <code>rankingScore</code> (descending).</li>
+      <li><strong>Response Fields</strong>: Returns public shop descriptors: <code>shopName</code>, `shopLogoUrl`, `shopAddress`, `categories` array (available categories), `avgRating`, and `reviewCount`.</li>
+    </ul>
+
+    <h3>B. Retrieve Shop Profile & Listed Categories</h3>
+    <pre>GET /sellers/:id</pre>
+    <ul>
+      <li><strong>Access</strong>: Public.</li>
+      <li><strong>Logic</strong>: Fetches details for a specific seller by ID. Returns the list of categories this shop sells in (e.g., `["men", "women", "kids"]`).</li>
+      <li><strong>Security</strong>: Excludes all sensitive fields like bank details, PAN/GST numbers, fcmTokens, or passwords.</li>
+    </ul>
+
+    <h3>C. Retrieve Products in a Shop Category</h3>
+    <pre>GET /products?sellerId=&lt;seller_id&gt;&amp;category=&lt;category_id_or_slug&gt;</pre>
+    <ul>
+      <li><strong>Access</strong>: Public.</li>
+      <li><strong>Logic</strong>: Filters products uploaded by the specific seller matching the selected category. The filters are combined via MongoDB **additive AND logic** to ensure accurate PDP results.</li>
+    </ul>
+
+    <h2>4. In-Store QR Payments & Checkout Flow</h2>
+    <div class="callout">
+      <div class="callout-title">Core Architecture Decision</div>
+      <p>Trystop collects all customer payments into a central master account during the day. Settlements to merchants are processed in a single nightly batch at midnight. Per-order real-time splits are avoided because high wallet redemption rates would cause live splits to fail if the online payment portion is lower than the merchant's net share.</p>
+    </div>
+
+    <h3>A. Create Payment Order</h3>
+    <pre>POST /payments/create-order</pre>
+    <ul>
+      <li><strong>Access Control</strong>: Authenticated Customer (<code>user</code> role only). Rate-limited to 10 requests/minute.</li>
+      <li><strong>Request Schema</strong>:
+        <pre>{
+  "sellerId": "64f89d3e8b091f001c...", // The ID of the merchant shop being paid
+  "totalAmount": 500.00,                 // The gross bill amount
+  "useWalletAmount": 125.00,             // Optional: amount to pay using wallet balance
+  "couponCode": "WELCOME50"              // Optional: coupon discount code
+}</pre>
+      </li>
+      <li><strong>Calculations & Rules Engine</strong>:
+        <ol>
+          <li><strong>Coupon Validation</strong>: Validates coupon code limits. If a coupon is matched, it computes the discount and reduces the bill:
+            <code>effectiveTotal = totalAmount - couponDiscount</code>.
+          </li>
+          <li><strong>Dynamic Wallet Cap Resolution</strong>:
+            <ul>
+              <li>Checks the user's profile for a specific <code>walletUsageCap</code> override.</li>
+              <li>If no override is present, it falls back to the global platform config: <code>wallet_usage_cap</code> (default is 75%).</li>
+              <li>Calculates the maximum allowed wallet usage: <code>maxWalletAllowed = effectiveTotal * walletCap</code>.</li>
+              <li>If the requested <code>useWalletAmount</code> exceeds this limit, it is automatically capped to <code>maxWalletAllowed</code>.</li>
+            </ul>
+          </li>
+          <li><strong>Breakdown Calculations</strong>: Evaluates the commission rate, PG fee shares, customer cashback, and net payout (see Section 6 for full breakdown formulas).</li>
+          <li><strong>Local Ledger Transaction</strong>: Saves a local <code>Transaction</code> record in the DB marked as <code>pending</code>. This snapshots all applied rates and fees for future audits.</li>
+          <li><strong>Cashfree Order Initialization</strong>: Creates an order via the Cashfree PG API for the online portion only:
+            <code>amountToChargeOnline = effectiveTotal - useWalletAmount</code>. Returns the payment link and dynamic QR parameters.
+          </li>
+        </ol>
+      </li>
+    </ul>
+
+    <h3>B. Idempotent Webhook Handler</h3>
+    <pre>POST /payments/webhook</pre>
+    <ul>
+      <li><strong>Access Control</strong>: Public (called securely by Cashfree).</li>
+      <li><strong>Verification & Safety Rules</strong>:
+        <ol>
+          <li><strong>Signature Verification</strong>: Computes the SHA256 HMAC of the raw request payload using `CASHFREE_WEBHOOK_SECRET` and compares it to the incoming `x-webhook-signature` header.</li>
+          <li><strong>Idempotency Lock</strong>: Looks up the transaction by `cashfreeOrderId`. If the local status is already marked `paid`, the webhook is acknowledged immediately, and execution terminates. This prevents double-crediting if Cashfree sends duplicate webhook notifications.</li>
+          <li><strong>Async Event Dispatching</strong>: Updates the transaction status to `paid` and queues the post-payment side-effects as independent jobs in BullMQ (FCM push notifications, cashback credits, ranking updates, coupon counts). If any background task fails, BullMQ retries it individually without affecting the payment webhook response.</li>
+        </ol>
+      </li>
+    </ul>
+
+    <h2>5. Wallet Ledger & Cashback Rules</h2>
+    <p>The local wallet system enforces transactional audit trails. A user's wallet balance is never stored as a single, mutable floating number without ledger tracing.</p>
+    
+    <h3>Wallet Ledger</h3>
+    <ul>
+      <li>The <code>WalletTransaction</code> collection records all credits and debits.</li>
+      <li>Every credit (cashback, admin promo) and debit (redemption, order checkout) is executed inside a **Mongoose Database Transaction session**. This writes the ledger entry and increments/decrements the user's `walletBalance` atomically.</li>
+    </ul>
+
+    <h3>Admin Wallet Audit Metrics</h3>
+    <ul>
+      <li><strong>Endpoint</strong>: <code>GET /wallet/admin/metrics</code></li>
+      <li><strong>Access Control</strong>: Admin Only (<code>superadmin</code> or <code>subadmin</code> with <code>manage_wallet</code> permission).</li>
+      <li><strong>Purpose</strong>: Aggregates total outstanding system liability. Returns the sum of all users' cached <code>walletBalance</code> (total coins currently circulating in the system), the total credits given, and total debits redeemed. This helps the platform manage and maintain matching liquid assets/reserve balances in their bank account.</li>
+    </ul>
+
+    <h3>Cashback Calculation Rule (§3.2)</h3>
+    <p>To prevent infinite cashback loops, cashback is **strictly calculated only on the online payment portion**, not on the portion covered by the wallet:</p>
+    <pre>cashbackEarned = effectiveCashbackRate * amountPaidOnline</pre>
+    
+    <p><strong>Mathematical Example</strong>: 
+    For a bill of ₹500, if a customer pays ₹375 using their wallet and ₹125 online via UPI:</p>
+    <ul>
+      <li><strong>Amount Paid Online</strong>: ₹125</li>
+      <li><strong>Cashback Rate</strong>: 10%</li>
+      <li><strong>Cashback Earned</strong>: <code>₹125 * 0.10 = ₹12.50</code> (instead of 10% of ₹500 = ₹50).</li>
+    </ul>
+
+    <h2>6. Commission Splits & Nightly Settlements</h2>
+    <p>Cashfree charges a 2% gateway collection fee on all online payments. This fee is split equally (50/50) between Trystop and the merchant (1% each).</p>
+
+    <h3>Split Formulas</h3>
+    <ul>
+      <li><code>commissionAmount = grossBillAmount * commissionRate</code> (commission rate is resolved per-seller, fallback to global config 15%)</li>
+      <li><code>pgFeeTotal = grossBillAmount * 0.02</code></li>
+      <li><code>pgFeeTrystopShare = pgFeeTotal * 0.50</code> (1%)</li>
+      <li><code>pgFeeSellerShare = pgFeeTotal * 0.50</code> (1%)</li>
+      <li><code>sellerNetPayout = grossBillAmount - commissionAmount - pgFeeSellerShare</code></li>
+      <li><code>trystopRetainedShare = commissionAmount - pgFeeTrystopShare</code></li>
+    </ul>
+
+    <p><strong>Merchant Payout Rule</strong>: The seller's payout is always calculated based on the **Gross Bill Amount**, meaning their earnings are unaffected by whether the customer pays using a wallet or cash. Trystop absorbs the wallet redemption costs from its central pool.</p>
+
+    <table style="width: 100%;">
+      <thead>
+        <tr>
+          <th>Scenario Parameters</th>
+          <th>Scenario A: No Wallet Used</th>
+          <th>Scenario B: Max Wallet Used (75%)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Gross Bill Amount</strong></td>
+          <td>₹500.00</td>
+          <td>₹500.00</td>
+        </tr>
+        <tr>
+          <td><strong>Wallet Used</strong></td>
+          <td>₹0.00</td>
+          <td>₹375.00</td>
+        </tr>
+        <tr>
+          <td><strong>Online Collection (UPI)</strong></td>
+          <td>₹500.00</td>
+          <td>₹125.00</td>
+        </tr>
+        <tr>
+          <td><strong>Commission (15%)</strong></td>
+          <td>₹75.00</td>
+          <td>₹75.00</td>
+        </tr>
+        <tr>
+          <td><strong>Total PG Fee (2%)</strong></td>
+          <td>₹10.00 (Trystop: ₹5 | Seller: ₹5)</td>
+          <td>₹10.00 (Trystop: ₹5 | Seller: ₹5)</td>
+        </tr>
+        <tr>
+          <td><strong>Seller Payout (Gross - Comm - SellerPG)</strong></td>
+          <td><strong>₹420.00</strong></td>
+          <td><strong>₹420.00</strong></td>
+        </tr>
+        <tr>
+          <td><strong>Trystop Net Retained Share</strong></td>
+          <td>₹70.00</td>
+          <td>-₹295.00 (drawn from float pool)</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>Nightly Payout & Settlement Cron</h3>
+    <p>A background job runs automatically at **00:00 midnight** daily:</p>
+    <ol>
+      <li>Queries all successful payments marked as `paid` and `unsettled`.</li>
+      <li>Groups transactions by `sellerId` and calculates the cumulative net payout for each seller.</li>
+      <li>Executes bulk payouts using the **Cashfree Payouts API** to transfer funds directly to each seller's bank account.</li>
+      <li>To handle partial network failures, the job updates transaction status to `processing` during the run. Failed transfers revert to `unsettled`, allowing the cron to be re-run safely without double-settling successfully processed vendors.</li>
+      <li>Runs an automated **Reconciliation Script** comparing Cashfree's settlement reports with the local database ledger, logging any discrepancy for manual review.</li>
+    </ol>
+
+    <h2>7. Shop Ranking Engine</h2>
+    <p>To incentivize merchants to process payments through the Trystop application, visibility rankings are heavily tied to verified online transaction volumes.</p>
+
+    <h3>Scoring Formula</h3>
+    <pre>rankingScore = (normalizedAvgRating * 0.35) + (normalizedReviewCount * 0.15) + (normalizedOnlineTxnVolume * 0.50)</pre>
+    
+    <ul>
+      <li><strong>normalizedAvgRating</strong>: Seller's average rating (1–5) scaled to 0–1 (<code>avgRating / 5</code>).</li>
+      <li><strong>normalizedReviewCount</strong>: Log-scaled review count relative to the top seller. Diminishing returns prevent top-tier shops from dominating infinitely:
+        <code>log(1 + reviewCount) / log(1 + maxReviewCountAcrossAllSellers)</code>.
+      </li>
+      <li><strong>normalizedOnlineTxnVolume</strong>: Log-scaled count of successful payments processed over a **rolling recent 30-day window**. 
+        Because it tracks a rolling 30-day window instead of lifetime volume, a merchant who moves customer payments to cash will see their ranking score drop quickly.
+      </li>
+    </ul>
+
+    <h2>8. Proximity-First Ad Serving Engine</h2>
+    <p>Sellers can purchase visibility boosts for their shop or products at a flat daily rate (configured by admins, default is ₹50/day for shops, ₹25/day for products).</p>
+
+    <h3>Ad Serving Endpoint</h3>
+    <pre>GET /ads/active?lat=26.85&amp;lng=75.82&amp;slot=home_banner</pre>
+    <ul>
+      <li><strong>Query Parameters</strong>: Requesting user's latitude and longitude, slot type (`home_banner`, `product_placement`, `shop_listing`), and result limit.</li>
+      <li><strong>Proximity Sorting</strong>: Filters to active, paid ads for the selected slot, and calculates the distance to the user using the **Haversine Formula**:
+        <pre>d = 2 * R * asin(sqrt(sin²(Δlat/2) + cos(lat1) * cos(lat2) * sin²(Δlng/2)))</pre>
+        Ads are sorted with the nearest store first.
+      </li>
+      <li><strong>Round-Robin Tie-Breaking</strong>: If multiple ads fall within the same distance threshold, they are sorted by `lastServedAt` (oldest/never served first). The database updates `lastServedAt = now` upon serving, guaranteeing fair exposure for competing merchants.</li>
+    </ul>
+
+    <h2>9. Client API Integration Checklist</h2>
+    
+    <h3>A. Customer Shop Browsing Flow</h3>
+    <ol>
+      <li>Fetch the list of ranked shops: `GET /sellers/ranked`.</li>
+      <li>When the user clicks a shop, fetch the shop profile and display the categories they list: `GET /sellers/:id`.</li>
+      <li>When a user selects a category within the shop, fetch the products matching both filters: `GET /products?sellerId=&lt;id&gt;&amp;category=&lt;category&gt;`.</li>
+    </ol>
+
+    <h3>B. Scan-to-Pay Payment Flow</h3>
+    <ol>
+      <li>Parse the `sellerId` from the scanned store QR code.</li>
+      <li>Query the user's wallet balance: `GET /wallet/balance`.</li>
+      <li>(Optional) If a promo code is entered, validate it: `GET /offers/coupons/:code/validate?orderAmount=&lt;amount&gt;`.</li>
+      <li>Submit order details: `POST /payments/create-order`.</li>
+      <li>Initialize the Cashfree Payment SDK using the returned payment session parameters.</li>
+      <li>Upon payment success, confirm the transaction status by checking the user's transaction history: `GET /payments/my-transactions`. *Do not trust the client-side redirection state directly.*</li>
+    </ol>
+  </div>
+</body>
+</html>
