@@ -41,8 +41,42 @@ export class CashfreeService {
   }
 
   /** Creates a payment order on Cashfree PG */
-  async createOrder(orderPayload: any): Promise<any> {
+  async createOrder(params: any): Promise<any> {
     try {
+      const orderId = params.orderId || params.order_id;
+      const orderAmount = params.orderAmount !== undefined ? Number(params.orderAmount) : Number(params.order_amount);
+      const orderCurrency = params.orderCurrency || params.order_currency || "INR";
+
+      const customerId =
+        params.customer_details?.customer_id ||
+        (orderId ? String(orderId).split("_")[1] : undefined) ||
+        "customer";
+      const customerName = params.customerName || params.customer_details?.customer_name || "Customer";
+      const customerEmail = params.customerEmail || params.customer_details?.customer_email || "customer@trystop.com";
+      const customerPhone = params.customerPhone || params.customer_details?.customer_phone || "9999999999";
+
+      const returnUrl = params.returnUrl || params.order_meta?.return_url || "";
+      const notifyUrl = params.notifyUrl || params.order_meta?.notify_url || "";
+
+      const orderPayload: any = {
+        order_id: orderId,
+        order_amount: orderAmount,
+        order_currency: orderCurrency,
+        customer_details: {
+          customer_id: customerId,
+          customer_name: customerName,
+          customer_email: customerEmail,
+          customer_phone: customerPhone,
+        },
+      };
+
+      if (returnUrl || notifyUrl) {
+        orderPayload.order_meta = {};
+        if (returnUrl) orderPayload.order_meta.return_url = returnUrl;
+        if (notifyUrl) orderPayload.order_meta.notify_url = notifyUrl;
+      }
+
+      this.logger.log(`Creating Cashfree order ${orderId} for ₹${orderAmount}`);
       const response = await this.pgClient.post("/orders", orderPayload);
       return response.data;
     } catch (error) {
