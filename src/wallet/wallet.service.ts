@@ -269,18 +269,69 @@ export class WalletService {
     };
   }
 
-  /** Get user's wallet transaction history (paginated) */
-  async getHistory(userId: string, page = 1, limit = 20): Promise<any> {
-    const skip = (page - 1) * limit;
-    const [transactions, total] = await Promise.all([
+  /** Get user's wallet transaction history (paginated with filters & search) */
+  async getHistory(
+    userId: string,
+    page = 1,
+    limit = 10,
+    type?: string,
+    reason?: string,
+    search?: string,
+  ): Promise<any> {
+    const pageNum = Math.max(1, Number(page) || 1);
+    const limitNum = Math.max(1, Math.min(100, Number(limit) || 10));
+    const skip = (pageNum - 1) * limitNum;
+
+    const filter: any = { userId: new Types.ObjectId(userId) };
+
+    if (type && type !== "ALL") {
+      filter.type = type.toLowerCase();
+    }
+    if (reason && reason !== "ALL") {
+      filter.reason = reason.toLowerCase();
+    }
+    if (search && search.trim()) {
+      const searchRegex = new RegExp(search.trim(), "i");
+      filter.$or = [
+        { note: searchRegex },
+        { reason: searchRegex },
+      ];
+    }
+
+    const [rawTransactions, total] = await Promise.all([
       this.walletTxnModel
-        .find({ userId: new Types.ObjectId(userId) })
+        .find(filter)
         .sort({ createdAt: -1 })
         .skip(skip)
-        .limit(limit),
-      this.walletTxnModel.countDocuments({ userId: new Types.ObjectId(userId) }),
+        .limit(limitNum)
+        .populate({
+          path: "relatedTransactionId",
+          select: "sellerId totalAmount amountPaidOnline walletAmountUsed voucherAmountUsed",
+          populate: {
+            path: "sellerId",
+            select: "shopName businessName",
+          },
+        })
+        .lean(),
+      this.walletTxnModel.countDocuments(filter),
     ]);
-    return { transactions, total, page, limit, totalPages: Math.ceil(total / limit) };
+
+    const transactions = rawTransactions.map((txn: any) => {
+      const related = txn.relatedTransactionId;
+      const shopName = related?.sellerId?.shopName || related?.sellerId?.businessName;
+      return {
+        ...txn,
+        shopName: shopName || null,
+      };
+    });
+
+    return {
+      transactions,
+      total,
+      page: pageNum,
+      limit: limitNum,
+      totalPages: Math.ceil(total / limitNum),
+    };
   }
 
   /**

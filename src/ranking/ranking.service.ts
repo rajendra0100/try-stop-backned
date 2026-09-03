@@ -303,6 +303,35 @@ export class RankingService {
     return seller;
   }
 
+  async getSellerGallery(sellerId: string, page = 1, limit = 15): Promise<any> {
+    if (!Types.ObjectId.isValid(sellerId)) {
+      throw new NotFoundException('Invalid seller ID format');
+    }
+    const seller = await this.sellerModel
+      .findOne({ _id: new Types.ObjectId(sellerId), verificationStatus: 'approved' })
+      .select('shopImages shopName');
+
+    if (!seller) {
+      throw new NotFoundException('Seller not found or not approved');
+    }
+
+    const allImages: string[] = seller.shopImages || [];
+    const total = allImages.length;
+    const pageNum = Math.max(1, page);
+    const limitNum = Math.max(1, Math.min(50, limit));
+    const skip = (pageNum - 1) * limitNum;
+    const images = allImages.slice(skip, skip + limitNum);
+
+    return {
+      images,
+      total,
+      page: pageNum,
+      limit: limitNum,
+      totalPages: Math.ceil(total / limitNum),
+      hasMore: skip + limitNum < total,
+    };
+  }
+
 
 
   /**

@@ -49,10 +49,22 @@ export class WalletController {
   @Roles(Role.USER)
   async getHistory(
     @CurrentUser() user: any,
-    @Query('page') page?: number,
-    @Query('limit') limit?: number,
+    @Query('page') page?: string | number,
+    @Query('limit') limit?: string | number,
+    @Query('type') type?: string,
+    @Query('reason') reason?: string,
+    @Query('search') search?: string,
   ) {
-    return this.walletService.getHistory(user._id.toString(), page, limit);
+    const pageNum = page ? Math.max(1, parseInt(page.toString(), 10) || 1) : 1;
+    const limitNum = limit ? Math.max(1, Math.min(100, parseInt(limit.toString(), 10) || 10)) : 10;
+    return this.walletService.getHistory(
+      user._id.toString(),
+      pageNum,
+      limitNum,
+      type,
+      reason,
+      search,
+    );
   }
 
   /**

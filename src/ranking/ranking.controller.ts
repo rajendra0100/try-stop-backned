@@ -53,6 +53,22 @@ export class RankingController {
   }
 
   /**
+   * GET /sellers/:id/gallery
+   * Returns paginated gallery images for a single seller.
+   * PUBLIC — no auth required.
+   */
+  @Get('sellers/:id/gallery')
+  async getSellerGallery(
+    @Param('id') id: string,
+    @Query('page') page?: string | number,
+    @Query('limit') limit?: string | number,
+  ) {
+    const pageNum = page ? Math.max(1, parseInt(page.toString(), 10) || 1) : 1;
+    const limitNum = limit ? Math.max(1, Math.min(50, parseInt(limit.toString(), 10) || 15)) : 15;
+    return this.rankingService.getSellerGallery(id, pageNum, limitNum);
+  }
+
+  /**
    * POST /admin/ranking/recompute
    * Manually triggers a full ranking recomputation.
    * In addition to the automated cron job running every 4 hours.

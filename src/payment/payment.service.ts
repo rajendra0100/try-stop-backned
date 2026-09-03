@@ -459,15 +459,16 @@ export class PaymentService {
     if (params.startDate || params.endDate) {
       const dateFilter: any = {};
       if (params.startDate) {
-        const start = new Date(params.startDate);
-        if (!isNaN(start.getTime())) dateFilter.$gte = start;
+        const s = params.startDate.length === 10
+          ? new Date(`${params.startDate}T00:00:00.000+05:30`)
+          : new Date(params.startDate);
+        if (!isNaN(s.getTime())) dateFilter.$gte = s;
       }
       if (params.endDate) {
-        const end = new Date(params.endDate);
-        if (!isNaN(end.getTime())) {
-          if (params.endDate.length === 10) end.setHours(23, 59, 59, 999);
-          dateFilter.$lte = end;
-        }
+        const e = params.endDate.length === 10
+          ? new Date(`${params.endDate}T23:59:59.999+05:30`)
+          : new Date(params.endDate);
+        if (!isNaN(e.getTime())) dateFilter.$lte = e;
       }
       if (Object.keys(dateFilter).length > 0) matchQuery.createdAt = dateFilter;
     }
@@ -478,11 +479,16 @@ export class PaymentService {
       .populate('customerId', 'name phone email')
       .lean();
 
-    // Group transactions by date YYYY-MM-DD
+    // Group transactions by date YYYY-MM-DD in India Standard Time (IST)
     const dateMap = new Map<string, any>();
 
     for (const txn of rawTransactions) {
-      const dateKey = new Date((txn as any).createdAt).toISOString().slice(0, 10);
+      let dateKey: string;
+      try {
+        dateKey = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date((txn as any).createdAt));
+      } catch {
+        dateKey = new Date((txn as any).createdAt).toISOString().slice(0, 10);
+      }
       if (!dateMap.has(dateKey)) {
         dateMap.set(dateKey, {
           date: dateKey,
@@ -1173,48 +1179,76 @@ export class PaymentService {
       paymentStatus: 'paid',
     };
 
-    // 1. Period / Date Filtering (Custom Range takes precedence if provided)
+    // 1. Period / Date Filtering (IST Timezone Aware)
+    const getIstDateRange = (dateStr: string): { start: Date; end: Date } => {
+      const start = new Date(`${dateStr}T00:00:00.000+05:30`);
+      const end = new Date(`${dateStr}T23:59:59.999+05:30`);
+      return { start, end };
+    };
+
+    const getTodayIst = (): string => {
+      try {
+        return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+      } catch {
+        return new Date().toISOString().slice(0, 10);
+      }
+    };
+
+    const getYesterdayIst = (): string => {
+      try {
+        const d = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(d);
+      } catch {
+        return new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      }
+    };
+
     if (startDate || endDate) {
       const dateFilter: any = {};
       if (startDate) {
-        const start = new Date(startDate);
-        if (!isNaN(start.getTime())) {
-          dateFilter.$gte = start;
+        const s = startDate.length === 10
+          ? new Date(`${startDate}T00:00:00.000+05:30`)
+          : new Date(startDate);
+        if (!isNaN(s.getTime())) {
+          dateFilter.$gte = s;
         }
       }
       if (endDate) {
-        const end = new Date(endDate);
-        if (!isNaN(end.getTime())) {
-          if (endDate.length === 10) {
-            end.setHours(23, 59, 59, 999);
-          }
-          dateFilter.$lte = end;
+        const e = endDate.length === 10
+          ? new Date(`${endDate}T23:59:59.999+05:30`)
+          : new Date(endDate);
+        if (!isNaN(e.getTime())) {
+          dateFilter.$lte = e;
         }
       }
       if (Object.keys(dateFilter).length > 0) {
         query.createdAt = dateFilter;
       }
     } else if (period && period !== 'all') {
-      const now = new Date();
       if (period === 'today') {
-        const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        query.createdAt = { $gte: startOfToday };
+        const todayStr = getTodayIst();
+        const { start, end } = getIstDateRange(todayStr);
+        query.createdAt = { $gte: start, $lte: end };
       } else if (period === 'yesterday') {
-        const startOfYesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
-        const endOfYesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        query.createdAt = { $gte: startOfYesterday, $lt: endOfYesterday };
+        const yestStr = getYesterdayIst();
+        const { start, end } = getIstDateRange(yestStr);
+        query.createdAt = { $gte: start, $lte: end };
       } else if (period === 'last_week') {
-        const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
         query.createdAt = { $gte: sevenDaysAgo };
       } else if (period === 'one_month') {
-        const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
         query.createdAt = { $gte: thirtyDaysAgo };
       }
     }
 
     // 2. Settlement Status Filtering
     if (settlementStatus && settlementStatus !== 'all') {
-      query.settlementStatus = settlementStatus;
+      if (settlementStatus === 'settled' || settlementStatus === 'paid') {
+        query.settlementStatus = 'settled';
+      } else if (settlementStatus === 'unsettled' || settlementStatus === 'pending') {
+        query.settlementStatus = { $in: ['unsettled', null] };
+      }
     }
 
     // 3. Search Query Matching

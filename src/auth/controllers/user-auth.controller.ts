@@ -151,12 +151,14 @@ export class UserAuthController {
   @Get('search-location')
   @HttpCode(HttpStatus.OK)
   async searchLocation(
-    @Query('q') q: string,
+    @Query('q') q?: string,
+    @Query('query') query?: string,
     @Query('lat') lat?: string,
     @Query('lng') lng?: string,
   ) {
+    const searchTerm = (q || query || '').trim();
     return this.authService.searchLocation(
-      q,
+      searchTerm,
       lat ? parseFloat(lat) : undefined,
       lng ? parseFloat(lng) : undefined,
     );
