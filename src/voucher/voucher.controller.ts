@@ -1,3 +1,4 @@
+import { SkipThrottle } from '@nestjs/throttler';
 import {
   Controller,
   Post,
@@ -46,6 +47,28 @@ export class VoucherController {
   ) {
     const userId = user ? (user._id?.toString() || user.userId || user.id) : undefined;
     return this.voucherService.getVoucherConfigs(sellerId, userId);
+  }
+
+  /**
+   * GET /vouchers/my-vouchers
+   * Authenticated user lists all vouchers purchased by them.
+   */
+  @SkipThrottle()
+  @Get('my-vouchers')
+  @UseGuards(JwtAuthGuard)
+  async getMyVouchers(
+    @CurrentUser() user: any,
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+    @Query('status') status?: string,
+  ) {
+    const userId = user._id?.toString() || user.userId || user.id;
+    return this.voucherService.getMyPurchasedVouchers(
+      userId,
+      page ? Number(page) : 1,
+      limit ? Number(limit) : 10,
+      status,
+    );
   }
 
   /**

@@ -1,28 +1,18 @@
 import {
-  Injectable, Logger, InternalServerErrorException,
+  Injectable, Logger, InternalServerErrorException, NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { initializeApp, cert } from 'firebase-admin';
+import * as path from 'path';
+import * as fs from 'fs';
+import { initializeApp, cert } from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
 
 import { User, UserDocument } from '../auth/schemas/user.schema';
 import { Seller, SellerDocument } from '../auth/schemas/seller.schema';
 
-/**
- * FcmNotificationService — Firebase Cloud Messaging push notification wrapper.
- *
- * Provides a generic send() method used both:
- *   - Automatically on payment success (customer + seller notifications)
- *   - Manually by admin for broadcast/targeted sends
- *
- * For "all users" broadcasts, uses Firebase topics (all_users topic)
- * instead of looping through individual FCM tokens — faster and scalable.
- *
- * Uses a placeholder/dummy Firebase service account in dev/sandbox.
- * Swapping to production is a config change only (FIREBASE_SERVICE_ACCOUNT_PATH).
- */
+
 @Injectable()
 export class FcmNotificationService {
   private readonly logger = new Logger(FcmNotificationService.name);
@@ -36,51 +26,68 @@ export class FcmNotificationService {
     this.initializeFirebase();
   }
 
-  /**
-   * Initializes Firebase Admin SDK.
-   * Uses service account from env config. Falls back gracefully if not configured.
-   */
   private initializeFirebase(): void {
     try {
-      const serviceAccountPath = this.configService.get<string>('FIREBASE_SERVICE_ACCOUNT_PATH');
+      const rawPath =
+        this.configService.get<string>('FIREBASE_SERVICE_ACCOUNT_PATH') ||
+        'config/firebase-service-account.json';
 
-      if (serviceAccountPath) {
-        const serviceAccount = require(serviceAccountPath);
+      const resolvedPath = path.isAbsolute(rawPath)
+        ? rawPath
+        : path.resolve(process.cwd(), rawPath);
+
+      if (fs.existsSync(resolvedPath)) {
+        const serviceAccount = require(resolvedPath);
         initializeApp({
           credential: cert(serviceAccount),
         });
+        this.firebaseInitialized = true;
+        this.logger.log(`Firebase Admin SDK initialized successfully from ${resolvedPath}`);
       } else {
-        // Placeholder initialization for development/sandbox
-        // In production, set FIREBASE_SERVICE_ACCOUNT_PATH in .env
         this.logger.warn(
-          'FIREBASE_SERVICE_ACCOUNT_PATH not configured. Push notifications will be logged but not sent.',
+          `FIREBASE_SERVICE_ACCOUNT_PATH file not found at ${resolvedPath}. Push notifications will be logged but not sent.`,
         );
-        return;
       }
-
-      this.firebaseInitialized = true;
-      this.logger.log('Firebase Admin SDK initialized successfully');
     } catch (error) {
       this.logger.error('Failed to initialize Firebase Admin SDK', error?.message);
       this.logger.warn('Push notifications will be logged but not sent.');
     }
   }
 
-  // ─── Core Send Methods ────────────────────────────────────────────────────
-
-  /**
-   * Sends a push notification to a single user by userId.
-   * Looks up the user's FCM token from their profile.
-   */
   async sendToUser(
     userId: string,
     title: string,
     body: string,
     data?: Record<string, string>,
   ): Promise<void> {
+    // 1. Persist in-app notification into User document
+    try {
+      await this.userModel.findByIdAndUpdate(userId, {
+        $push: {
+          notifications: {
+            $each: [
+              {
+                title,
+                message: body,
+                type: data?.type || "general",
+                data: data || {},
+                isRead: false,
+                createdAt: new Date(),
+              },
+            ],
+            $position: 0,
+            $slice: 100,
+          },
+        },
+      });
+    } catch (err) {
+      this.logger.warn(`Failed to persist in-app notification for user ${userId}: ${err?.message}`);
+    }
+
+    // 2. Deliver push notification
     const user = await this.userModel.findById(userId).select('fcmToken name');
     if (!user?.fcmToken) {
-      this.logger.warn(`No FCM token for user ${userId} — notification not sent`);
+      this.logger.warn(`No FCM token for user ${userId} — push notification not sent`);
       return;
     }
 
@@ -88,30 +95,90 @@ export class FcmNotificationService {
     this.logger.log(`Push notification sent to user ${userId}: "${title}"`);
   }
 
-  /**
-   * Sends a push notification to a seller by sellerId.
-   * Uses the seller's FCM token from their profile.
-   */
   async sendToSeller(
     sellerId: string,
     title: string,
     body: string,
     data?: Record<string, string>,
   ): Promise<void> {
-    const seller = await this.sellerModel.findById(sellerId).select('fcmToken shopName');
-    if (!seller?.fcmToken) {
+    let fcmToken: string | null = null;
+
+    // 1. Check sellerModel by sellerId
+    try {
+      const seller = await this.sellerModel.findById(sellerId).select("fcmToken phone email shopName");
+      if (seller?.fcmToken) {
+        fcmToken = seller.fcmToken;
+      } else if (seller?.phone || seller?.email) {
+        // Fallback: check if User with same phone/email has fcmToken
+        const user = await this.userModel.findOne({
+          $or: [
+            seller.phone ? { phone: seller.phone } : null,
+            seller.email ? { email: seller.email } : null,
+          ].filter(Boolean) as any,
+        }).select("fcmToken");
+        if (user?.fcmToken) {
+          fcmToken = user.fcmToken;
+        }
+      }
+    } catch (err) {
+      this.logger.warn(`Error looking up seller ${sellerId} in sellerModel: ${err?.message}`);
+    }
+
+    // 2. Check userModel if sellerId was a User _id or staff member
+    if (!fcmToken) {
+      try {
+        const user = await this.userModel.findById(sellerId).select("fcmToken phone email");
+        if (user?.fcmToken) {
+          fcmToken = user.fcmToken;
+        } else if (user?.phone || user?.email) {
+          const matchingSeller = await this.sellerModel.findOne({
+            $or: [
+              user.phone ? { phone: user.phone } : null,
+              user.email ? { email: user.email } : null,
+            ].filter(Boolean) as any,
+          }).select("fcmToken");
+          if (matchingSeller?.fcmToken) {
+            fcmToken = matchingSeller.fcmToken;
+          }
+        }
+      } catch (err) {
+        this.logger.warn(`Error looking up seller in userModel: ${err?.message}`);
+      }
+    }
+
+    if (!fcmToken) {
       this.logger.warn(`No FCM token for seller ${sellerId} — notification not sent`);
       return;
     }
 
-    await this.sendToToken(seller.fcmToken, title, body, data);
+    // Persist in-app notification to seller
+    try {
+      await this.sellerModel.findByIdAndUpdate(sellerId, {
+        $push: {
+          notifications: {
+            $each: [
+              {
+                title,
+                message: body,
+                type: data?.type || "general",
+                data: data || {},
+                isRead: false,
+                createdAt: new Date(),
+              },
+            ],
+            $position: 0,
+            $slice: 100,
+          },
+        },
+      });
+    } catch (err) {
+      this.logger.warn(`Failed to persist in-app notification for seller ${sellerId}: ${err?.message}`);
+    }
+
+    await this.sendToToken(fcmToken, title, body, data);
     this.logger.log(`Push notification sent to seller ${sellerId}: "${title}"`);
   }
 
-  /**
-   * Sends a broadcast notification to all users via Firebase topic.
-   * Devices subscribe to "all_users" topic on app launch.
-   */
   async sendToAll(
     title: string,
     body: string,
@@ -121,15 +188,6 @@ export class FcmNotificationService {
     this.logger.log(`Broadcast notification sent to all_users topic: "${title}"`);
   }
 
-  // ─── Payment Success Notifications (§5) ──────────────────────────────────
-
-  /**
-   * Sends payment success notifications to both customer and seller.
-   * Called automatically from the payment events queue processor.
-   *
-   * Customer: "Payment successful, you earned ₹X cashback"
-   * Seller: "Payment of ₹X Received Successfully!" (with loud sound)
-   */
   async sendPaymentSuccessNotifications(params: {
     customerId: string;
     sellerId: string;
@@ -137,48 +195,63 @@ export class FcmNotificationService {
     cashbackEarned: number;
     amountPaidOnline: number;
     walletAmountUsed: number;
+    transactionId?: string;
   }): Promise<void> {
-    // Customer notification
+    const txnId = params.transactionId ? params.transactionId.toString() : '';
+
+    const hasCashback = params.cashbackEarned && Number(params.cashbackEarned) > 0;
+    const customerBody = hasCashback
+      ? `Your payment of ₹${params.totalAmount} was successful. You earned ₹${params.cashbackEarned} cashback! 🎉`
+      : `Your payment of ₹${params.totalAmount} was successful.`;
+
     await this.sendToUser(
       params.customerId,
       'Payment Successful! 🎉',
-      `Your payment of ₹${params.totalAmount} was successful. You earned ₹${params.cashbackEarned} cashback!`,
+      customerBody,
       {
         type: 'payment_success',
+        screen: 'WALLET',
         totalAmount: params.totalAmount.toString(),
-        cashbackEarned: params.cashbackEarned.toString(),
+        cashbackEarned: hasCashback ? params.cashbackEarned.toString() : '0',
+        transactionId: txnId,
+        sound: 'payment_received',
       },
     );
 
-    // Seller notification (with loud sound — handled by client app using 'sound' field)
     await this.sendToSeller(
       params.sellerId,
       '💰 Payment Received!',
       `Payment of ₹${params.totalAmount} Received Successfully!`,
       {
         type: 'payment_received',
+        screen: 'SELLER_ORDERS',
         totalAmount: params.totalAmount.toString(),
         amountOnline: params.amountPaidOnline.toString(),
         walletUsed: params.walletAmountUsed.toString(),
-        sound: 'payment_received', // Client handles the loud notification sound
+        transactionId: txnId,
+        sound: 'payment_received',
       },
     );
   }
 
-  // ─── FCM Token Management ──────────────────────────────────────────────────
-
-  /**
-   * Registers or updates a user's FCM token.
-   * Called on every app launch to keep tokens fresh.
-   * Also subscribes the device to the "all_users" topic.
-   */
   async registerUserToken(userId: string, fcmToken: string): Promise<void> {
-    await this.userModel.findByIdAndUpdate(userId, { fcmToken });
+    const user = await this.userModel.findByIdAndUpdate(userId, { fcmToken }, { new: true });
+    // Also sync to sellerModel if matching phone or email exists
+    if (user?.phone || user?.email) {
+      await this.sellerModel.updateMany(
+        {
+          $or: [
+            user.phone ? { phone: user.phone } : null,
+            user.email ? { email: user.email } : null,
+          ].filter(Boolean) as any,
+        },
+        { fcmToken },
+      );
+    }
 
-    // Subscribe to all_users topic for broadcast notifications
     if (this.firebaseInitialized) {
       try {
-        await getMessaging().subscribeToTopic([fcmToken], 'all_users');
+        await getMessaging().subscribeToTopic([fcmToken], "all_users");
         this.logger.log(`User ${userId} subscribed to all_users topic`);
       } catch (error) {
         this.logger.error(`Failed to subscribe to topic: ${error?.message}`);
@@ -186,26 +259,34 @@ export class FcmNotificationService {
     }
   }
 
-  /**
-   * Registers or updates a seller's FCM token.
-   */
   async registerSellerToken(sellerId: string, fcmToken: string): Promise<void> {
-    await this.sellerModel.findByIdAndUpdate(sellerId, { fcmToken });
+    const seller = await this.sellerModel.findByIdAndUpdate(sellerId, { fcmToken }, { new: true });
+    // Also sync to userModel if matching phone or email exists
+    if (seller?.phone || seller?.email) {
+      await this.userModel.updateMany(
+        {
+          $or: [
+            seller.phone ? { phone: seller.phone } : null,
+            seller.email ? { email: seller.email } : null,
+          ].filter(Boolean) as any,
+        },
+        { fcmToken },
+      );
+    } else {
+      // In case sellerId was stored as user _id
+      await this.userModel.findByIdAndUpdate(sellerId, { fcmToken });
+    }
 
     if (this.firebaseInitialized) {
       try {
-        await getMessaging().subscribeToTopic([fcmToken], 'all_sellers');
+        await getMessaging().subscribeToTopic([fcmToken], "all_sellers");
+        this.logger.log(`Seller ${sellerId} subscribed to all_sellers topic`);
       } catch (error) {
         this.logger.error(`Failed to subscribe seller to topic: ${error?.message}`);
       }
     }
   }
 
-  // ─── Private Helpers ──────────────────────────────────────────────────────
-
-  /**
-   * Sends a notification to a specific FCM token.
-   */
   private async sendToToken(
     token: string,
     title: string,
@@ -232,7 +313,7 @@ export class FcmNotificationService {
         apns: {
           payload: {
             aps: {
-              sound: data?.sound || 'default',
+              sound: data?.sound ? (data.sound.includes('.') ? data.sound : `${data.sound}.wav`) : 'default',
               badge: 1,
             },
           },
@@ -240,13 +321,9 @@ export class FcmNotificationService {
       });
     } catch (error) {
       this.logger.error(`Failed to send push notification: ${error?.message}`);
-      // Don't throw — notification failure should never block the caller
     }
   }
-
-  /**
-   * Sends a notification to a Firebase topic.
-   */
+  
   private async sendToTopic(
     topic: string,
     title: string,
@@ -268,5 +345,57 @@ export class FcmNotificationService {
     } catch (error) {
       this.logger.error(`Failed to send topic notification: ${error?.message}`);
     }
+  }
+  async getUserNotifications(userId: string, page = 1, limit = 20) {
+    const user = await this.userModel.findById(userId).select("notifications");
+    if (!user) throw new NotFoundException("User not found");
+
+    const allNotifications = (user as any).notifications || [];
+    const sorted = [...allNotifications].sort((a: any, b: any) => {
+      const timeA = new Date(a.createdAt || 0).getTime();
+      const timeB = new Date(b.createdAt || 0).getTime();
+      return timeB - timeA;
+    });
+
+    const pageNum = Math.max(1, Number(page) || 1);
+    const limitNum = Math.max(1, Number(limit) || 20);
+    const startIndex = (pageNum - 1) * limitNum;
+    const paginatedItems = sorted.slice(startIndex, startIndex + limitNum);
+    const total = sorted.length;
+    const totalPages = Math.ceil(total / limitNum);
+    const hasMore = pageNum < totalPages;
+    const unreadCount = sorted.filter((n: any) => !n.isRead).length;
+
+    return {
+      notifications: paginatedItems,
+      total,
+      unreadCount,
+      page: pageNum,
+      limit: limitNum,
+      totalPages,
+      hasMore,
+    };
+  }
+
+  async markUserNotificationRead(userId: string, notificationId?: string) {
+    const user = await this.userModel.findById(userId);
+    if (!user) throw new NotFoundException("User not found");
+
+    if (notificationId) {
+      (user as any).notifications = ((user as any).notifications || []).map((n: any) =>
+        n._id?.toString() === notificationId || n.id === notificationId
+          ? { ...n, isRead: true }
+          : n,
+      );
+    } else {
+      (user as any).notifications = ((user as any).notifications || []).map((n: any) => ({
+        ...n,
+        isRead: true,
+      }));
+    }
+
+    user.markModified("notifications");
+    await user.save();
+    return { success: true, message: "Notifications marked as read" };
   }
 }

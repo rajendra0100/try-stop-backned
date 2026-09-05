@@ -1,5 +1,5 @@
 import {
-  Controller, Post, Get, Body, Param, UseGuards,
+  Controller, Post, Get, Patch, Body, Query, Param, UseGuards,
 } from '@nestjs/common';
 import { FcmNotificationService } from './fcm-notification.service';
 import { SendNotificationDto, RegisterFcmTokenDto } from './dto/notification.dto';
@@ -57,11 +57,46 @@ export class FcmNotificationController {
   @Post('register-token')
   @UseGuards(JwtAuthGuard)
   async registerToken(@CurrentUser() user: any, @Body() dto: RegisterFcmTokenDto) {
-    if (user.role === Role.SELLER) {
+    const isSeller = user.role === Role.SELLER || Boolean(user.shopName);
+    if (isSeller) {
       await this.fcmNotificationService.registerSellerToken(user._id.toString(), dto.fcmToken);
     } else {
       await this.fcmNotificationService.registerUserToken(user._id.toString(), dto.fcmToken);
     }
     return { message: 'FCM token registered successfully' };
+  }
+
+  /**
+   * GET /notifications/my-notifications
+   * Get in-app notifications for authenticated user
+   */
+  @Get("my-notifications")
+  @UseGuards(JwtAuthGuard)
+  async getMyNotifications(
+    @CurrentUser() user: any,
+    @Query("page") page?: number,
+    @Query("limit") limit?: number,
+  ) {
+    return this.fcmNotificationService.getUserNotifications(
+      user._id.toString(),
+      page,
+      limit,
+    );
+  }
+
+  /**
+   * PATCH /notifications/read
+   * Mark all or specific user in-app notifications as read
+   */
+  @Patch("read")
+  @UseGuards(JwtAuthGuard)
+  async markNotificationRead(
+    @CurrentUser() user: any,
+    @Body() body?: { notificationId?: string },
+  ) {
+    return this.fcmNotificationService.markUserNotificationRead(
+      user._id.toString(),
+      body?.notificationId,
+    );
   }
 }

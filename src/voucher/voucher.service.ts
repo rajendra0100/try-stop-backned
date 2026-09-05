@@ -436,7 +436,7 @@ export class VoucherService {
           {
             userId: pendingOrder.userId,
             voucherConfigId: pendingOrder.voucherConfigId, // null for custom amount loading
-            faceValue: voucherCreditAmount,
+            faceValue: pendingOrder.faceValue || voucherCreditAmount,
             amountPaid,
             remainingBalance: voucherCreditAmount,
             status: 'active',
@@ -589,5 +589,77 @@ export class VoucherService {
     );
 
     this.logger.log(`Debited voucher balance: ₹${amount} from user ${userId}`);
+  }
+
+  /**
+   * Get all vouchers purchased by a specific user with pagination.
+   */
+  async getMyPurchasedVouchers(
+    userId: string,
+    page = 1,
+    limit = 10,
+    status?: string,
+  ) {
+    const parsedPage = Math.max(1, Number(page) || 1);
+    const parsedLimit = Math.max(1, Math.min(100, Number(limit) || 10));
+    const skip = (parsedPage - 1) * parsedLimit;
+
+    const query: any = { userId: new Types.ObjectId(userId) };
+    if (status) {
+      query.status = status;
+    }
+
+    const [items, total] = await Promise.all([
+      this.userVoucherModel
+        .find(query)
+        .populate({
+          path: 'voucherConfigId',
+          select: 'title description faceValue discountPercent createdBy sellerId',
+          populate: {
+            path: 'sellerId',
+            select: 'shopName shopLogoUrl',
+          },
+        })
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parsedLimit)
+        .lean(),
+      this.userVoucherModel.countDocuments(query),
+    ]);
+
+    const vouchers = items.map((uv: any) => {
+      const config = uv.voucherConfigId;
+      const faceValue = config?.faceValue || uv.faceValue;
+      const amountPaid = uv.amountPaid;
+      const title = config?.title || 'Trystop Voucher';
+      const description = config?.description || 'Instant wallet voucher';
+      const createdBy = config?.createdBy || 'admin';
+      const shopName =
+        config?.sellerId?.shopName ||
+        (createdBy === 'admin' ? 'Trystop Exclusive' : 'Partner Shop');
+
+      return {
+        _id: uv._id.toString(),
+        title,
+        description,
+        faceValue,
+        amountPaid,
+        remainingBalance: uv.remainingBalance,
+        status: uv.status || 'active',
+        createdBy,
+        shopName,
+        purchaseDate: uv.createdAt,
+        voucherConfigId: config?._id?.toString() || null,
+      };
+    });
+
+    return {
+      vouchers,
+      total,
+      page: parsedPage,
+      limit: parsedLimit,
+      totalPages: Math.ceil(total / parsedLimit),
+      hasMore: parsedPage < Math.ceil(total / parsedLimit),
+    };
   }
 }

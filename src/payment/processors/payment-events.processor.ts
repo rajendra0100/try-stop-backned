@@ -70,9 +70,9 @@ export class PaymentEventsProcessor {
    */
   @Process('send-notifications')
   async handleSendNotifications(job: Job): Promise<void> {
-    const { customerId, sellerId, totalAmount, cashbackEarned, amountPaidOnline, walletAmountUsed } = job.data;
+    const { customerId, sellerId, totalAmount, cashbackEarned, amountPaidOnline, walletAmountUsed, transactionId } = job.data;
 
-    this.logger.log(`[Job ${job.id}] Sending payment notifications`);
+    this.logger.log(`[Job ${job.id}] Sending payment notifications for txn ${transactionId}`);
 
     try {
       await this.fcmNotificationService.sendPaymentSuccessNotifications({
@@ -82,6 +82,7 @@ export class PaymentEventsProcessor {
         cashbackEarned,
         amountPaidOnline,
         walletAmountUsed,
+        transactionId,
       });
     } catch (error) {
       this.logger.error(`[Job ${job.id}] Notification sending failed: ${error?.message}`);

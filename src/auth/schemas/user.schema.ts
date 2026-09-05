@@ -110,6 +110,30 @@ export class User {
 
   @Prop({ type: [{ type: Types.ObjectId, ref: 'Seller' }], default: [] })
   favoriteSellers: Types.ObjectId[];
+
+  /** In-app notifications for user */
+  @Prop({
+    type: [
+      {
+        title: { type: String, required: true },
+        message: { type: String, required: true },
+        type: { type: String, default: "general" },
+        data: { type: Object, default: {} },
+        isRead: { type: Boolean, default: false },
+        createdAt: { type: Date, default: Date.now },
+      },
+    ],
+    default: [],
+  })
+  notifications: {
+    _id?: any;
+    title: string;
+    message: string;
+    type?: string;
+    data?: any;
+    isRead?: boolean;
+    createdAt: Date;
+  }[];
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

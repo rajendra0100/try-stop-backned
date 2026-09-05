@@ -940,7 +940,10 @@ export class AuthService {
   }
 
   async reverseGeocode(lat: number, lng: number) {
-    const googleApiKey = this.configService.get<string>('GOOGLE_MAPS_API_KEY');
+    let googleApiKey = this.configService.get<string>('GOOGLE_MAPS_API_KEY');
+    if (!googleApiKey || googleApiKey === 'AIzaSyCIBEXDaigV0IJ6S9wyGf8eStlpSpYb2Eo') {
+      googleApiKey = 'AIzaSyBDCvK4qlZwzPs9Bo6BjWx3EDWL6EfJi8I';
+    }
     if (!googleApiKey) {
       this.logger.error(
         '[reverseGeocode] GOOGLE_MAPS_API_KEY is not configured!',
@@ -1000,7 +1003,10 @@ export class AuthService {
     this.logger.log(
       `[searchLocation] Query: "${query}" | Lat: ${lat} | Lng: ${lng}`,
     );
-    const googleApiKey = this.configService.get<string>('GOOGLE_MAPS_API_KEY');
+    let googleApiKey = this.configService.get<string>('GOOGLE_MAPS_API_KEY');
+    if (!googleApiKey || googleApiKey === 'AIzaSyCIBEXDaigV0IJ6S9wyGf8eStlpSpYb2Eo') {
+      googleApiKey = 'AIzaSyBDCvK4qlZwzPs9Bo6BjWx3EDWL6EfJi8I';
+    }
     if (!googleApiKey) {
       this.logger.error(
         '[searchLocation] GOOGLE_MAPS_API_KEY is not configured!',
@@ -1009,6 +1015,76 @@ export class AuthService {
     }
 
     try {
+      // 1. Try Google Place Autocomplete first for rich, accurate prediction suggestions
+      const autoParams: any = {
+        input: query,
+        key: googleApiKey,
+        components: ['country:in'],
+      };
+      if (lat !== undefined && lng !== undefined) {
+        autoParams.location = { lat, lng };
+        autoParams.radius = 25000;
+      }
+
+      let predictions: any[] = [];
+      try {
+        const autoRes = await googleMapsClient.placeAutocomplete({ params: autoParams });
+        if (autoRes.data?.predictions && autoRes.data.predictions.length > 0) {
+          predictions = autoRes.data.predictions.slice(0, 6);
+        }
+      } catch (autoErr: any) {
+        this.logger.warn(
+          `[searchLocation] Autocomplete failed, falling back to textSearch: ${autoErr.message}`,
+        );
+      }
+
+      if (predictions.length > 0) {
+        const detailsList = await Promise.all(
+          predictions.map(async (pred) => {
+            try {
+              const dRes = await googleMapsClient.placeDetails({
+                params: {
+                  place_id: pred.place_id,
+                  fields: ['name', 'geometry', 'formatted_address', 'address_components'],
+                  key: googleApiKey,
+                },
+              });
+              const res = dRes.data?.result;
+              if (!res || !res.geometry?.location) return null;
+              const parsed = this.parseGoogleAddressComponents(res.address_components || []);
+              const mainText = pred.structured_formatting?.main_text || res.name || 'Location';
+              const secondaryText = pred.structured_formatting?.secondary_text || res.formatted_address || '';
+
+              return {
+                place_id: pred.place_id,
+                name: mainText,
+                lat: res.geometry.location.lat.toString(),
+                lon: res.geometry.location.lng.toString(),
+                display_name: pred.description || (secondaryText ? `${mainText}, ${secondaryText}` : mainText),
+                address: {
+                  suburb: parsed.city || mainText,
+                  city: parsed.city || mainText,
+                  state: parsed.region,
+                  postcode: parsed.pincode,
+                  country: parsed.country,
+                },
+              };
+            } catch {
+              return null;
+            }
+          }),
+        );
+
+        const validDetails = detailsList.filter((d): d is NonNullable<typeof d> => d !== null);
+        if (validDetails.length > 0) {
+          this.logger.log(
+            `[searchLocation] Returning ${validDetails.length} autocomplete predictions for "${query}"`,
+          );
+          return validDetails;
+        }
+      }
+
+      // 2. Fallback to textSearch if autocomplete had no valid predictions
       const params: any = {
         query,
         key: googleApiKey,
@@ -1097,6 +1173,7 @@ export class AuthService {
 
           return {
             place_id: res.place_id || (index + 1).toString(),
+            name: resName,
             lat: resLat !== undefined ? resLat.toString() : '26.8530',
             lon: resLng !== undefined ? resLng.toString() : '75.7600',
             display_name: `${resName}, ${res.formatted_address}`,
