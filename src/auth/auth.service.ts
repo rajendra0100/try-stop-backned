@@ -19,6 +19,7 @@ const googleMapsClient = new GoogleMapsClient({});
 import { User, UserDocument } from './schemas/user.schema';
 import { Seller, SellerDocument } from './schemas/seller.schema';
 import { Transaction, TransactionDocument } from '../payment/schemas/transaction.schema';
+import { Review, ReviewDocument } from '../review/schemas/review.schema';
 import { Role } from '../common/enums/role.enum';
 import { OtpService } from '../otp/otp.service';
 import { NotificationService } from '../notification/notification.service';
@@ -66,6 +67,8 @@ export class AuthService {
     private readonly deletedUserModel: Model<DeletedUserDocument>,
     @InjectModel(Transaction.name)
     private readonly transactionModel: Model<TransactionDocument>,
+    @InjectModel(Review.name)
+    private readonly reviewModel: Model<ReviewDocument>,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly otpService: OtpService,
@@ -460,6 +463,33 @@ export class AuthService {
     }
 
     if (user.role === Role.SELLER || user.shopName) {
+      let avgRating = Number(user.avgRating) || 0;
+      let reviewCount = Number(user.reviewCount) || 0;
+
+      try {
+        const sellerObjectId = new Types.ObjectId(user._id.toString());
+        const aggregate = await this.reviewModel.aggregate([
+          { $match: { sellerId: sellerObjectId } },
+          { $group: { _id: null, avgRating: { $avg: '$rating' }, count: { $sum: 1 } } },
+        ]);
+
+        if (aggregate.length > 0) {
+          avgRating = Math.round(aggregate[0].avgRating * 10) / 10;
+          reviewCount = aggregate[0].count;
+        } else {
+          avgRating = 0;
+          reviewCount = 0;
+        }
+
+        // Synchronize cached values in seller document
+        await this.sellerModel.findByIdAndUpdate(user._id, {
+          avgRating,
+          reviewCount,
+        });
+      } catch (err: any) {
+        this.logger.warn(`Failed to aggregate real reviews for seller ${user._id}: ${err.message}`);
+      }
+
       return {
         success: true,
         message: 'Seller profile retrieved successfully',
@@ -490,6 +520,8 @@ export class AuthService {
           minPrice: user.minPrice,
           maxPrice: user.maxPrice,
           discountPercent: user.discountPercent || 0,
+          avgRating,
+          reviewCount,
           stories: user.stories || [],
           verificationStatus: user.verificationStatus,
           staffMembers: user.staffMembers || [],

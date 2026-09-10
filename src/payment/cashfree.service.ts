@@ -46,7 +46,7 @@ export class CashfreeService {
   async createOrder(params: any): Promise<any> {
     try {
       const orderId = params.orderId || params.order_id;
-      const orderAmount = params.orderAmount !== undefined ? Number(params.orderAmount) : Number(params.order_amount);
+      const orderAmount = params.orderAmount !== undefined ? Math.round(Number(params.orderAmount) * 100) / 100 : Math.round(Number(params.order_amount) * 100) / 100;
       const orderCurrency = params.orderCurrency || params.order_currency || "INR";
 
       const customerId =

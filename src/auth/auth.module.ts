@@ -14,6 +14,7 @@ import { SellerDeletionRequest, SellerDeletionRequestSchema } from './schemas/se
 import { Admin, AdminSchema } from '../admin-auth/schemas/admin.schema';
 import { DeletedUser, DeletedUserSchema } from './schemas/deleted-user.schema';
 import { Transaction, TransactionSchema } from '../payment/schemas/transaction.schema';
+import { Review, ReviewSchema } from '../review/schemas/review.schema';
 
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { FileStorageModule } from '../file-storage/file-storage.module';
@@ -30,6 +31,7 @@ import { FcmNotificationModule } from '../fcm-notification/fcm-notification.modu
       { name: Admin.name, schema: AdminSchema },
       { name: DeletedUser.name, schema: DeletedUserSchema },
       { name: Transaction.name, schema: TransactionSchema },
+      { name: Review.name, schema: ReviewSchema },
     ]),
     PassportModule,
     JwtModule.register({}),

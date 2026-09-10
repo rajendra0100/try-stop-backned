@@ -298,6 +298,28 @@ export class WalletService {
       ];
     }
 
+    const cashbackTxns: any[] = await this.walletTxnModel
+      .find({
+        userId: new Types.ObjectId(userId),
+        reason: 'cashback',
+        relatedTransactionId: { $ne: null },
+      })
+      .select('relatedTransactionId')
+      .lean();
+
+    const cashbackRelatedIds = cashbackTxns
+      .map((t: any) => t.relatedTransactionId)
+      .filter(Boolean);
+
+    if (cashbackRelatedIds.length > 0) {
+      filter['$nor'] = [
+        {
+          reason: 'wallet_redemption',
+          relatedTransactionId: { $in: cashbackRelatedIds },
+        },
+      ];
+    }
+
     const [rawTransactions, total] = await Promise.all([
       this.walletTxnModel
         .find(filter)
@@ -306,7 +328,7 @@ export class WalletService {
         .limit(limitNum)
         .populate({
           path: "relatedTransactionId",
-          select: "sellerId totalAmount amountPaidOnline walletAmountUsed voucherAmountUsed",
+          select: "sellerId totalAmount amountPaidOnline walletAmountUsed voucherAmountUsed couponCode couponDiscount cashbackEarned",
           populate: {
             path: "sellerId",
             select: "shopName businessName",

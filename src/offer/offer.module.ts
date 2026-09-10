@@ -7,15 +7,10 @@ import { CashbackConfig, CashbackConfigSchema } from './schemas/cashback-config.
 import { Coupon, CouponSchema } from './schemas/coupon.schema';
 import { CouponUsage, CouponUsageSchema } from './schemas/coupon-usage.schema';
 import { User, UserSchema } from '../auth/schemas/user.schema';
+import { Seller, SellerSchema } from '../auth/schemas/seller.schema';
 import { PlatformConfig, PlatformConfigSchema } from '../payment/schemas/platform-config.schema';
 import { Transaction, TransactionSchema } from '../payment/schemas/transaction.schema';
 
-/**
- * OfferModule — cashback config, coupons, wallet cap settings.
- *
- * Independent module — no circular dependencies.
- * Exports OfferService for PaymentModule to resolve cashback rates and validate coupons.
- */
 @Module({
   imports: [
     MongooseModule.forFeature([
@@ -23,6 +18,7 @@ import { Transaction, TransactionSchema } from '../payment/schemas/transaction.s
       { name: Coupon.name, schema: CouponSchema },
       { name: CouponUsage.name, schema: CouponUsageSchema },
       { name: User.name, schema: UserSchema },
+      { name: Seller.name, schema: SellerSchema },
       { name: PlatformConfig.name, schema: PlatformConfigSchema },
       { name: Transaction.name, schema: TransactionSchema },
     ]),

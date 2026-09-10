@@ -23,7 +23,7 @@ export class Review {
   transactionId: Types.ObjectId;
 
   /** 1-5 star rating */
-  @Prop({ required: true, min: 1, max: 5 })
+  @Prop({ required: true, min: 0.5, max: 5 })
   rating: number;
 
   @Prop({ default: '' })

@@ -1,8 +1,14 @@
 import {
-  Controller, Post, Get, Body, Param, Query, UseGuards,
+  Controller, Post, Get, Patch, Delete, Body, Param, Query, UseGuards,
 } from '@nestjs/common';
 import { OfferService } from './offer.service';
-import { SetCashbackRateDto, CreateCouponDto, SetWalletCapDto } from './dto/offer.dto';
+import {
+  SetCashbackRateDto,
+  CreateCouponDto,
+  SellerCreateCouponDto,
+  QueryCouponsDto,
+  SetWalletCapDto,
+} from './dto/offer.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -10,30 +16,10 @@ import { RequirePermission } from '../common/guards/permission.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Role } from '../common/enums/role.enum';
 
-/**
- * OfferController — cashback rates, coupons, and wallet cap management.
- *
- * Route access summary:
- *   GET  /offers/cashback-rate         — internal/admin — resolve effective rate for a user
- *   POST /offers/cashback-rate         — admin — set global or per-user rate
- *   GET  /offers/cashback-configs      — admin — list all cashback configs
- *   POST /offers/coupons               — admin — create/edit a coupon
- *   GET  /offers/coupons               — admin — list all coupons
- *   GET  /offers/coupons/:code/validate — auth (USER) — validate a coupon code
- *   POST /admin/wallet-cap             — admin — set global or user wallet cap
- *   GET  /admin/wallet-cap/resolve/:id — admin — check effective wallet cap for a user
- */
 @Controller()
 export class OfferController {
   constructor(private readonly offerService: OfferService) {}
 
-  // ─── Cashback Rate Endpoints ──────────────────────────────────────────────
-
-  /**
-   * GET /offers/cashback-rate?userId=...
-   * Resolves the effective cashback rate for a user.
-   * Internal/admin endpoint — used by payment flow and admin dashboard.
-   */
   @Get('offers/cashback-rate')
   @RequirePermission('manage_offers')
   async getCashbackRate(@Query('userId') userId: string) {
@@ -41,108 +27,172 @@ export class OfferController {
     return this.offerService.getCashbackRateForUser(userId);
   }
 
-  /**
-   * POST /offers/cashback-rate
-   * Set a cashback rate (global or per-user).
-   * Admin-only endpoint.
-   */
   @Post('offers/cashback-rate')
   @RequirePermission('manage_offers')
   async setCashbackRate(@Body() dto: SetCashbackRateDto) {
     return this.offerService.setCashbackRate(dto);
   }
 
-  /**
-   * GET /offers/cashback-configs
-   * List all cashback configuration entries (admin dashboard).
-   */
   @Get('offers/cashback-configs')
   @RequirePermission('manage_offers')
   async listCashbackConfigs() {
     return this.offerService.listCashbackConfigs();
   }
 
-
-  /**
-   * GET /admin/config/cashback-global
-   * Retrieves active global cashback/discount settings (first-order, subsequent, slabs).
-   */
-  @Get("admin/config/cashback-global")
-  @RequirePermission("manage_offers")
+  @Get('admin/config/cashback-global')
+  @RequirePermission('manage_offers')
   async getGlobalCashbackConfig() {
     return this.offerService.getGlobalCashbackConfig();
   }
 
-  /**
-   * POST /admin/config/cashback-global
-   * Updates active global cashback/discount settings.
-   */
-  @Post("admin/config/cashback-global")
-  @RequirePermission("manage_offers")
+  @Post('admin/config/cashback-global')
+  @RequirePermission('manage_offers')
   async setGlobalCashbackConfig(@Body() body: any) {
     return this.offerService.setGlobalCashbackConfig(body);
   }
 
-  // ─── Coupon Endpoints ──────────────────────────────────────────────────────
+  @Post('seller/coupons')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.SELLER)
+  async createSellerCoupon(
+    @CurrentUser() user: any,
+    @Body() dto: SellerCreateCouponDto,
+  ) {
+    return this.offerService.createSellerCoupon(user._id.toString(), dto);
+  }
 
-  /**
-   * POST /offers/coupons
-   * Create a new coupon code. Admin-only.
-   */
+  @Get('seller/coupons')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.SELLER)
+  async listSellerCoupons(
+    @CurrentUser() user: any,
+    @Query('page') page: any,
+    @Query('limit') limit: any,
+    @Query('search') search: string,
+    @Query('status') status: string,
+  ) {
+    return this.offerService.listSellerCoupons(
+      user._id.toString(),
+      Number(page) || 1,
+      Number(limit) || 10,
+      search || '',
+      status || 'all',
+    );
+  }
+
+  @Patch('seller/coupons/:id/status')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.SELLER)
+  async toggleSellerCouponStatus(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+  ) {
+    return this.offerService.toggleCouponStatus(id, user._id.toString());
+  }
+
+  @Delete('seller/coupons/:id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.SELLER)
+  async deleteSellerCoupon(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+  ) {
+    return this.offerService.deleteCoupon(id, user._id.toString());
+  }
+
+  @Post('admin/coupons')
+  @RequirePermission('manage_offers')
+  async adminCreateCoupon(
+    @CurrentUser() user: any,
+    @Body() dto: CreateCouponDto,
+  ) {
+    const adminId = user?._id?.toString() || '';
+    return this.offerService.adminCreateCoupon(adminId, dto);
+  }
+
+  @Get('admin/coupons')
+  @RequirePermission('manage_offers')
+  async adminListCoupons(@Query() query: QueryCouponsDto) {
+    return this.offerService.adminListCoupons(query);
+  }
+
+  @Patch('admin/coupons/:id/status')
+  @RequirePermission('manage_offers')
+  async toggleAdminCouponStatus(@Param('id') id: string) {
+    return this.offerService.toggleCouponStatus(id);
+  }
+
+  @Delete('admin/coupons/:id')
+  @RequirePermission('manage_offers')
+  async deleteAdminCoupon(@Param('id') id: string) {
+    return this.offerService.deleteCoupon(id);
+  }
+
+  @Get('admin/sellers/:sellerId/coupons')
+  @RequirePermission('manage_offers')
+  async adminGetSellerCoupons(@Param('sellerId') sellerId: string) {
+    return this.offerService.adminGetSellerCoupons(sellerId);
+  }
+
   @Post('offers/coupons')
   @RequirePermission('manage_offers')
   async createCoupon(@Body() dto: CreateCouponDto) {
     return this.offerService.createCoupon(dto);
   }
 
-  /**
-   * GET /offers/coupons
-   * List all coupons (admin dashboard).
-   */
   @Get('offers/coupons')
   @RequirePermission('manage_offers')
   async listCoupons() {
     return this.offerService.listCoupons();
   }
 
-  /**
-   * GET /offers/coupons/:code/validate?orderAmount=500
-   * Validates a coupon code for the current user.
-   * Checks: active, not expired, usage limits, min order value.
-   * AUTH required — customer (USER).
-   */
   @Get('offers/coupons/:code/validate')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.USER)
   async validateCoupon(
     @Param('code') code: string,
     @Query('orderAmount') orderAmount: number,
+    @Query('sellerId') sellerId: string,
     @CurrentUser() user: any,
   ) {
-    return this.offerService.validateCouponPublic(code, orderAmount, user._id.toString());
+    return this.offerService.validateCouponPublic(
+      code,
+      Number(orderAmount),
+      user._id.toString(),
+      sellerId,
+    );
   }
 
-  // ─── Wallet Cap Endpoints ──────────────────────────────────────────────────
-
-  /**
-   * POST /admin/wallet-cap
-   * Set global or per-user wallet usage cap.
-   * Admin-only endpoint.
-   */
   @Post('admin/wallet-cap')
   @RequirePermission('manage_offers')
   async setWalletCap(@Body() dto: SetWalletCapDto) {
     return this.offerService.setWalletCap(dto);
   }
 
-  /**
-   * GET /admin/wallet-cap/resolve/:id
-   * Check the effective wallet cap for a user.
-   * Admin/internal endpoint.
-   */
   @Get('admin/wallet-cap/resolve/:id')
   @RequirePermission('manage_offers')
   async resolveWalletCap(@Param('id') userId: string) {
     return this.offerService.resolveWalletCap(userId);
   }
+
+  @Get('offers/coupons/store/:sellerId')
+  @UseGuards(JwtAuthGuard)
+  async getStoreCoupons(
+    @Param('sellerId') sellerId: string,
+    @CurrentUser() user: any,
+  ) {
+    const userId = user?._id?.toString();
+    return this.offerService.getStoreCouponsForUser(sellerId, userId);
+  }
+
+  @Get('coupons/store/:sellerId')
+  @UseGuards(JwtAuthGuard)
+  async getStoreCouponsAlias(
+    @Param('sellerId') sellerId: string,
+    @CurrentUser() user: any,
+  ) {
+    const userId = user?._id?.toString();
+    return this.offerService.getStoreCouponsForUser(sellerId, userId);
+  }
+
 }

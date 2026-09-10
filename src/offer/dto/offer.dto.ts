@@ -17,16 +17,11 @@ export class CashbackSlabDto {
   cashbackRate: number;
 }
 
-/**
- * DTO for setting cashback rate (global or per-user).
- * Admin-only endpoint.
- */
 export class SetCashbackRateDto {
   @IsNotEmpty()
   @IsIn(['global', 'user'])
   scope: 'global' | 'user';
 
-  /** Required when scope = "user" */
   @IsOptional()
   @IsMongoId()
   userId?: string;
@@ -68,14 +63,22 @@ export class SetCashbackRateDto {
   isActive?: boolean;
 }
 
-/**
- * DTO for creating/editing a coupon.
- * Admin-only endpoint.
- */
 export class CreateCouponDto {
+  @IsOptional()
+  @IsMongoId()
+  sellerId?: string;
+
   @IsNotEmpty()
   @IsString()
   code: string;
+
+  @IsOptional()
+  @IsString()
+  title?: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
 
   @IsNotEmpty()
   @IsIn(['flat', 'percent'])
@@ -96,15 +99,18 @@ export class CreateCouponDto {
   @Min(0)
   maxDiscountAmount?: number;
 
-  @IsNotEmpty()
-  @IsDateString()
-  validFrom: string;
+  @IsOptional()
+  @IsIn(['all', 'first_order', 'subsequent_orders'])
+  appliesTo?: 'all' | 'first_order' | 'subsequent_orders';
 
-  @IsNotEmpty()
+  @IsOptional()
   @IsDateString()
-  validTill: string;
+  validFrom?: string;
 
-  /** Total redemptions allowed (null = unlimited) */
+  @IsOptional()
+  @IsDateString()
+  validTill?: string;
+
   @IsOptional()
   @IsNumber()
   usageLimit?: number;
@@ -119,16 +125,85 @@ export class CreateCouponDto {
   isActive?: boolean;
 }
 
-/**
- * DTO for setting wallet cap (global or per-user).
- * Admin-only endpoint.
- */
+export class SellerCreateCouponDto {
+  @IsNotEmpty()
+  @IsString()
+  code: string;
+
+  @IsOptional()
+  @IsString()
+  title?: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @IsNotEmpty()
+  @IsIn(['flat', 'percent'])
+  discountType: 'flat' | 'percent';
+
+  @IsNotEmpty()
+  @IsNumber()
+  @Min(0)
+  discountValue: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  minOrderValue?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  maxDiscountAmount?: number;
+
+  @IsOptional()
+  @IsIn(['all', 'first_order', 'subsequent_orders'])
+  appliesTo?: 'all' | 'first_order' | 'subsequent_orders';
+
+  @IsOptional()
+  @IsDateString()
+  validFrom?: string;
+
+  @IsOptional()
+  @IsDateString()
+  validTill?: string;
+
+  @IsOptional()
+  @IsNumber()
+  usageLimit?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  perUserLimit?: number;
+}
+
+export class QueryCouponsDto {
+  @IsOptional()
+  page?: string | number;
+
+  @IsOptional()
+  limit?: string | number;
+
+  @IsOptional()
+  search?: string;
+
+  @IsOptional()
+  sellerId?: string;
+
+  @IsOptional()
+  status?: string;
+
+  @IsOptional()
+  appliesTo?: string;
+}
+
 export class SetWalletCapDto {
   @IsNotEmpty()
   @IsIn(['global', 'user'])
   target: 'global' | 'user';
 
-  /** Required when target = "user" */
   @IsOptional()
   @IsMongoId()
   userId?: string;

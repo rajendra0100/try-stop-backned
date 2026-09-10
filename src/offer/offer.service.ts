@@ -8,21 +8,11 @@ import { CashbackConfig, CashbackConfigDocument } from './schemas/cashback-confi
 import { Coupon, CouponDocument } from './schemas/coupon.schema';
 import { CouponUsage, CouponUsageDocument } from './schemas/coupon-usage.schema';
 import { User, UserDocument } from '../auth/schemas/user.schema';
+import { Seller, SellerDocument } from '../auth/schemas/seller.schema';
 import { PlatformConfig, PlatformConfigDocument } from '../payment/schemas/platform-config.schema';
 import { Transaction, TransactionDocument } from '../payment/schemas/transaction.schema';
-import { SetCashbackRateDto, CreateCouponDto, SetWalletCapDto } from './dto/offer.dto';
+import { SetCashbackRateDto, CreateCouponDto, SellerCreateCouponDto, SetWalletCapDto } from './dto/offer.dto';
 
-/**
- * OfferService — manages cashback rates, coupons, and wallet cap settings.
- *
- * Cashback resolution: user-specific > global fallback.
- * Wallet cap resolution: user-specific > global fallback.
- * Nothing hardcoded — all values admin-configurable.
- *
- * Callable by:
- *   - PaymentService (resolves effective rates)
- *   - Admin (manages rates, coupons, wallet caps)
- */
 @Injectable()
 export class OfferService {
   private readonly logger = new Logger(OfferService.name);
@@ -32,32 +22,25 @@ export class OfferService {
     @InjectModel(Coupon.name) private readonly couponModel: Model<CouponDocument>,
     @InjectModel(CouponUsage.name) private readonly couponUsageModel: Model<CouponUsageDocument>,
     @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
+    @InjectModel(Seller.name) private readonly sellerModel: Model<SellerDocument>,
     @InjectModel(PlatformConfig.name) private readonly platformConfigModel: Model<PlatformConfigDocument>,
     @InjectModel(Transaction.name) private readonly transactionModel: Model<TransactionDocument>,
   ) {}
 
-  // ─── Cashback Rate Management (§4) ──────────────────────────────────────────
-
-  /**
-   * Helper to evaluate custom/slab rates on a config document.
-   */
   private async evaluateCashbackRate(
     config: CashbackConfig,
     userId: string,
     amount?: number,
   ): Promise<number> {
-    // 1. Determine if this is the user's first order
     const orderCount = await this.transactionModel.countDocuments({
       customerId: new Types.ObjectId(userId),
       paymentStatus: 'paid',
     });
 
-    // 2. First-order rate takes absolute precedence (bypasses slabs)
     if (orderCount === 0 && config.firstOrderRate !== null && config.firstOrderRate !== undefined) {
       return config.firstOrderRate;
     }
 
-    // 3. Check slabs (applies to subsequent orders, or first orders if no firstOrderRate is configured)
     if (amount !== undefined && config.slabs && config.slabs.length > 0) {
       const sortedSlabs = [...config.slabs].sort((a, b) => a.maxAmount - b.maxAmount);
       for (const slab of sortedSlabs) {
@@ -68,25 +51,16 @@ export class OfferService {
       return sortedSlabs[sortedSlabs.length - 1].cashbackRate;
     }
 
-    // 4. If no slabs apply/exist, check subsequent order rate
     if (orderCount > 0 && config.subsequentRate !== null && config.subsequentRate !== undefined) {
       return config.subsequentRate;
     }
 
-    // 5. Fallback to flat cashbackRate
     return config.cashbackRate;
   }
 
-  /**
-   * Resolves the effective cashback rate for a user.
-   * Priority: active user-specific config > active global config > 0.
-   *
-   * Used internally by PaymentService during order creation.
-   */
   async resolveEffectiveCashbackRate(userId: string, amount?: number): Promise<number> {
     const now = new Date();
 
-    // 1. Check for active user-specific config
     const userConfig = await this.cashbackConfigModel.findOne({
       scope: 'user',
       userId: new Types.ObjectId(userId),
@@ -99,7 +73,6 @@ export class OfferService {
       return this.evaluateCashbackRate(userConfig, userId, amount);
     }
 
-    // 2. Fallback to global config
     const globalConfig = await this.cashbackConfigModel.findOne({
       scope: 'global',
       isActive: true,
@@ -114,10 +87,6 @@ export class OfferService {
     return 0;
   }
 
-  /**
-   * Sets a cashback rate (global or per-user).
-   * Admin-only endpoint.
-   */
   async setCashbackRate(dto: SetCashbackRateDto): Promise<CashbackConfigDocument> {
     if (dto.scope === 'user' && !dto.userId) {
       throw new BadRequestException('userId is required when scope is "user"');
@@ -139,10 +108,6 @@ export class OfferService {
     return config;
   }
 
-  /**
-   * Gets the effective cashback rate for a user (resolves user-specific vs global).
-   * Used by both internal flow and admin dashboard.
-   */
   async getCashbackRateForUser(userId: string, amount?: number): Promise<{
     effectiveRate: number;
     source: 'user' | 'global' | 'default';
@@ -177,47 +142,264 @@ export class OfferService {
     return { effectiveRate: 0, source: 'default' };
   }
 
-  // ─── Coupon Management (§4.2) ───────────────────────────────────────────────
+  async createSellerCoupon(sellerId: string, dto: SellerCreateCouponDto): Promise<CouponDocument> {
+    const code = dto.code.trim().toUpperCase();
+    const existing = await this.couponModel.findOne({
+      code,
+      sellerId: new Types.ObjectId(sellerId),
+      isDeleted: false,
+    });
+    if (existing) {
+      throw new BadRequestException(`A coupon with code "${code}" already exists for your store`);
+    }
 
-  /**
-   * Creates a new coupon. Admin-only.
-   */
-  async createCoupon(dto: CreateCouponDto): Promise<CouponDocument> {
-    const existing = await this.couponModel.findOne({ code: dto.code.toUpperCase() });
-    if (existing) throw new BadRequestException(`Coupon code "${dto.code}" already exists`);
+    const discountVal = Number(dto.discountValue);
+    if (isNaN(discountVal) || discountVal <= 0) {
+      throw new BadRequestException('Discount value must be greater than 0');
+    }
+
+    if (dto.discountType === 'percent' && discountVal > 100) {
+      throw new BadRequestException('Discount percentage cannot exceed 100%');
+    }
 
     return this.couponModel.create({
-      code: dto.code.toUpperCase(),
-      discountType: dto.discountType,
-      discountValue: dto.discountValue,
-      minOrderValue: dto.minOrderValue || 0,
-      maxDiscountAmount: dto.maxDiscountAmount || null,
-      validFrom: new Date(dto.validFrom),
-      validTill: new Date(dto.validTill),
-      usageLimit: dto.usageLimit || null,
-      perUserLimit: dto.perUserLimit || 1,
-      isActive: dto.isActive !== undefined ? dto.isActive : true,
+      sellerId: new Types.ObjectId(sellerId),
+      code,
+      title: dto.title?.trim() || '',
+      description: dto.description?.trim() || '',
+      discountType: dto.discountType || 'percent',
+      discountValue: discountVal,
+      minOrderValue: dto.minOrderValue ? Number(dto.minOrderValue) : 0,
+      maxDiscountAmount: dto.maxDiscountAmount ? Number(dto.maxDiscountAmount) : null,
+      appliesTo: dto.appliesTo || 'all',
+      validFrom: dto.validFrom ? new Date(dto.validFrom) : new Date(),
+      validTill: dto.validTill ? new Date(dto.validTill) : null,
+      usageLimit: dto.usageLimit ? Number(dto.usageLimit) : null,
+      perUserLimit: dto.perUserLimit ? Number(dto.perUserLimit) : 1,
+      isActive: true,
+      isDeleted: false,
+      createdBy: 'seller',
+      createdById: new Types.ObjectId(sellerId),
     });
   }
 
-  /**
-   * Validates a coupon and returns the discount amount.
-   * Checks: active, not expired, usage limits not exceeded, min order value met.
-   *
-   * Returns the computed discount amount (capped if percent with maxDiscountAmount).
-   */
+  async listSellerCoupons(
+    sellerId: string,
+    page: number = 1,
+    limit: number = 10,
+    search: string = '',
+    status: string = 'all',
+  ): Promise<{
+    coupons: CouponDocument[];
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  }> {
+    const pageNum = Math.max(1, Number(page) || 1);
+    const limitNum = Math.max(1, Number(limit) || 10);
+    const skip = (pageNum - 1) * limitNum;
+
+    const query: any = {
+      sellerId: new Types.ObjectId(sellerId),
+      isDeleted: false,
+    };
+
+    if (status === 'active') {
+      query.isActive = true;
+    } else if (status === 'inactive') {
+      query.isActive = false;
+    }
+
+    if (search && search.trim()) {
+      const searchRegex = new RegExp(search.trim(), 'i');
+      query.$or = [{ code: searchRegex }, { title: searchRegex }];
+    }
+
+    const [coupons, total] = await Promise.all([
+      this.couponModel.find(query).sort({ createdAt: -1 }).skip(skip).limit(limitNum),
+      this.couponModel.countDocuments(query),
+    ]);
+
+    return {
+      coupons,
+      total,
+      page: pageNum,
+      limit: limitNum,
+      totalPages: Math.ceil(total / limitNum) || 1,
+    };
+  }
+
+  async toggleCouponStatus(couponId: string, sellerId?: string): Promise<CouponDocument> {
+    const query: any = { _id: new Types.ObjectId(couponId), isDeleted: false };
+    if (sellerId) {
+      query.sellerId = new Types.ObjectId(sellerId);
+    }
+
+    const coupon = await this.couponModel.findOne(query);
+    if (!coupon) {
+      throw new NotFoundException('Coupon not found');
+    }
+
+    coupon.isActive = !coupon.isActive;
+    await coupon.save();
+    return coupon;
+  }
+
+  async deleteCoupon(couponId: string, sellerId?: string): Promise<{ success: boolean; message: string }> {
+    const query: any = { _id: new Types.ObjectId(couponId), isDeleted: false };
+    if (sellerId) {
+      query.sellerId = new Types.ObjectId(sellerId);
+    }
+
+    const coupon = await this.couponModel.findOne(query);
+    if (!coupon) {
+      throw new NotFoundException('Coupon not found');
+    }
+
+    coupon.isDeleted = true;
+    coupon.isActive = false;
+    await coupon.save();
+
+    return { success: true, message: 'Coupon removed successfully' };
+  }
+
+  async adminCreateCoupon(adminId: string, dto: CreateCouponDto): Promise<CouponDocument> {
+    const code = dto.code.trim().toUpperCase();
+    const query: any = { code, isDeleted: false };
+    if (dto.sellerId) {
+      query.sellerId = new Types.ObjectId(dto.sellerId);
+    }
+    const existing = await this.couponModel.findOne(query);
+    if (existing) {
+      throw new BadRequestException(`Coupon code "${code}" already exists`);
+    }
+
+    const discountVal = Number(dto.discountValue);
+    if (isNaN(discountVal) || discountVal <= 0) {
+      throw new BadRequestException('Discount value must be greater than 0');
+    }
+
+    if (dto.discountType === 'percent' && discountVal > 100) {
+      throw new BadRequestException('Discount percentage cannot exceed 100%');
+    }
+
+    return this.couponModel.create({
+      sellerId: dto.sellerId ? new Types.ObjectId(dto.sellerId) : null,
+      code,
+      title: dto.title?.trim() || '',
+      description: dto.description?.trim() || '',
+      discountType: dto.discountType || 'percent',
+      discountValue: discountVal,
+      minOrderValue: dto.minOrderValue ? Number(dto.minOrderValue) : 0,
+      maxDiscountAmount: dto.maxDiscountAmount ? Number(dto.maxDiscountAmount) : null,
+      appliesTo: dto.appliesTo || 'all',
+      validFrom: dto.validFrom ? new Date(dto.validFrom) : new Date(),
+      validTill: dto.validTill ? new Date(dto.validTill) : null,
+      usageLimit: dto.usageLimit ? Number(dto.usageLimit) : null,
+      perUserLimit: dto.perUserLimit ? Number(dto.perUserLimit) : 1,
+      isActive: dto.isActive !== undefined ? dto.isActive : true,
+      isDeleted: false,
+      createdBy: 'admin',
+      createdById: adminId ? new Types.ObjectId(adminId) : null,
+    });
+  }
+
+  async adminListCoupons(params: {
+    page?: any;
+    limit?: any;
+    search?: string;
+    sellerId?: string;
+    status?: string;
+    appliesTo?: string;
+  }): Promise<{
+    coupons: any[];
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  }> {
+    const pageNum = Math.max(1, Number(params.page) || 1);
+    const limitNum = Math.max(1, Number(params.limit) || 10);
+    const skip = (pageNum - 1) * limitNum;
+
+    const query: any = { isDeleted: false };
+
+    if (params.sellerId && Types.ObjectId.isValid(params.sellerId)) {
+      query.sellerId = new Types.ObjectId(params.sellerId);
+    }
+
+    if (params.status === 'active') {
+      query.isActive = true;
+    } else if (params.status === 'inactive') {
+      query.isActive = false;
+    }
+
+    if (params.appliesTo && params.appliesTo !== 'all') {
+      query.appliesTo = params.appliesTo;
+    }
+
+    if (params.search && params.search.trim()) {
+      const searchRegex = new RegExp(params.search.trim(), 'i');
+      query.$or = [{ code: searchRegex }, { title: searchRegex }];
+    }
+
+    const [coupons, total] = await Promise.all([
+      this.couponModel
+        .find(query)
+        .populate('sellerId', 'shopName ownerName phone shopLogoUrl email')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limitNum),
+      this.couponModel.countDocuments(query),
+    ]);
+
+    return {
+      coupons,
+      total,
+      page: pageNum,
+      limit: limitNum,
+      totalPages: Math.ceil(total / limitNum) || 1,
+    };
+  }
+
+  async adminGetSellerCoupons(sellerId: string): Promise<CouponDocument[]> {
+    return this.couponModel
+      .find({ sellerId: new Types.ObjectId(sellerId), isDeleted: false })
+      .sort({ createdAt: -1 });
+  }
+
+  async createCoupon(dto: CreateCouponDto): Promise<CouponDocument> {
+    return this.adminCreateCoupon('', dto);
+  }
+
   async validateCoupon(
     code: string,
     orderAmount: number,
     userId: string,
+    sellerId?: string,
   ): Promise<{ valid: boolean; discountAmount: number; coupon: CouponDocument }> {
-    const coupon = await this.couponModel.findOne({ code: code.toUpperCase() });
-    if (!coupon) throw new NotFoundException('Coupon not found');
+    const cleanCode = code.trim().toUpperCase();
+    const query: any = { code: cleanCode, isDeleted: false };
+    if (sellerId && Types.ObjectId.isValid(sellerId)) {
+      query.$or = [{ sellerId: new Types.ObjectId(sellerId) }, { sellerId: null }];
+    }
 
-    if (!coupon.isActive) throw new BadRequestException('Coupon is not active');
+    const coupon = await this.couponModel.findOne(query);
+    if (!coupon) {
+      throw new NotFoundException('Coupon not found');
+    }
+
+    if (!coupon.isActive) {
+      throw new BadRequestException('Coupon is currently disabled');
+    }
+
+    if (coupon.sellerId && sellerId && coupon.sellerId.toString() !== sellerId.toString()) {
+      throw new BadRequestException('This coupon is not valid for this store');
+    }
 
     const now = new Date();
-    if (now < coupon.validFrom || now > coupon.validTill) {
+    if ((coupon.validFrom && now < coupon.validFrom) || (coupon.validTill && now > coupon.validTill)) {
       throw new BadRequestException('Coupon has expired or is not yet valid');
     }
 
@@ -225,12 +407,10 @@ export class OfferService {
       throw new BadRequestException(`Minimum order value of ₹${coupon.minOrderValue} required`);
     }
 
-    // Check total usage limit
     if (coupon.usageLimit !== null && coupon.usageCount >= coupon.usageLimit) {
       throw new BadRequestException('Coupon usage limit reached');
     }
 
-    // Check per-user usage limit
     const userUsage = await this.couponUsageModel.findOne({
       userId: new Types.ObjectId(userId),
       couponId: coupon._id,
@@ -239,18 +419,30 @@ export class OfferService {
       throw new BadRequestException('You have already used this coupon the maximum number of times');
     }
 
-    // Calculate discount
+    if (coupon.appliesTo === 'first_order' || coupon.appliesTo === 'subsequent_orders') {
+      const txQuery: any = { customerId: new Types.ObjectId(userId), paymentStatus: 'paid' };
+      if (coupon.sellerId) {
+        txQuery.sellerId = coupon.sellerId;
+      }
+      const txCount = await this.transactionModel.countDocuments(txQuery);
+      if (coupon.appliesTo === 'first_order' && txCount > 0) {
+        throw new BadRequestException('This coupon is valid only on your first order');
+      }
+      if (coupon.appliesTo === 'subsequent_orders' && txCount === 0) {
+        throw new BadRequestException('This coupon is valid only on repeat orders');
+      }
+    }
+
     let discountAmount: number;
     if (coupon.discountType === 'flat') {
       discountAmount = coupon.discountValue;
     } else {
-      discountAmount = Math.round((orderAmount * coupon.discountValue / 100) * 100) / 100;
+      discountAmount = Math.round(((orderAmount * coupon.discountValue) / 100) * 100) / 100;
       if (coupon.maxDiscountAmount && discountAmount > coupon.maxDiscountAmount) {
         discountAmount = coupon.maxDiscountAmount;
       }
     }
 
-    // Don't let discount exceed order amount
     if (discountAmount > orderAmount) {
       discountAmount = orderAmount;
     }
@@ -258,18 +450,12 @@ export class OfferService {
     return { valid: true, discountAmount, coupon };
   }
 
-  /**
-   * Records a coupon usage after successful payment.
-   * Called from the payment events queue processor.
-   */
   async recordCouponUsage(couponCode: string, userId: string): Promise<void> {
-    const coupon = await this.couponModel.findOne({ code: couponCode.toUpperCase() });
+    const coupon = await this.couponModel.findOne({ code: couponCode.trim().toUpperCase() });
     if (!coupon) return;
 
-    // Increment global usage count
     await this.couponModel.findByIdAndUpdate(coupon._id, { $inc: { usageCount: 1 } });
 
-    // Increment per-user usage count (upsert)
     await this.couponUsageModel.findOneAndUpdate(
       { userId: new Types.ObjectId(userId), couponId: coupon._id },
       { $inc: { usageCount: 1 } },
@@ -277,28 +463,25 @@ export class OfferService {
     );
   }
 
-  /**
-   * Validates a coupon code for the public endpoint (without consuming it).
-   */
-  async validateCouponPublic(code: string, orderAmount: number, userId: string): Promise<any> {
-    const result = await this.validateCoupon(code, orderAmount, userId);
+  async validateCouponPublic(
+    code: string,
+    orderAmount: number,
+    userId: string,
+    sellerId?: string,
+  ): Promise<any> {
+    const result = await this.validateCoupon(code, orderAmount, userId, sellerId);
     return {
       valid: result.valid,
       discountAmount: result.discountAmount,
       discountType: result.coupon.discountType,
       discountValue: result.coupon.discountValue,
+      maxDiscountAmount: result.coupon.maxDiscountAmount,
+      title: result.coupon.title,
     };
   }
 
-  // ─── Wallet Cap Management (§4.1) ──────────────────────────────────────────
-
-  /**
-   * Sets the wallet usage cap globally or for a specific user.
-   * Admin-only endpoint.
-   */
   async setWalletCap(dto: SetWalletCapDto): Promise<any> {
     if (dto.target === 'global') {
-      // Update global cap in platform_config
       const config = await this.platformConfigModel.findOneAndUpdate(
         { key: 'wallet_usage_cap' },
         { key: 'wallet_usage_cap', value: dto.walletUsageCap, description: 'Global wallet usage cap (e.g. 0.75 = 75%)' },
@@ -310,7 +493,6 @@ export class OfferService {
 
     if (!dto.userId) throw new BadRequestException('userId is required when target is "user"');
 
-    // Set per-user cap
     const user = await this.userModel.findByIdAndUpdate(
       dto.userId,
       { walletUsageCap: dto.walletUsageCap },
@@ -322,10 +504,6 @@ export class OfferService {
     return { target: 'user', userId: dto.userId, walletUsageCap: dto.walletUsageCap };
   }
 
-  /**
-   * Resolves the effective wallet cap for a user.
-   * User-specific > global fallback > default 0.75.
-   */
   async resolveWalletCap(userId: string): Promise<{
     effectiveCap: number;
     source: 'user' | 'global' | 'default';
@@ -343,32 +521,21 @@ export class OfferService {
     return { effectiveCap: 0.75, source: 'default' };
   }
 
-  // ─── Admin Query Helpers ──────────────────────────────────────────────────
-
-  /** List all cashback configs (for admin dashboard) */
   async listCashbackConfigs(): Promise<CashbackConfigDocument[]> {
     return this.cashbackConfigModel.find().populate('userId', 'name email').sort({ createdAt: -1 });
   }
 
-  /** List all coupons (for admin dashboard) */
-
-  /**
-   * Retrieves the current active global cashback/discount configuration.
-   */
   async getGlobalCashbackConfig(): Promise<CashbackConfigDocument | null> {
-    return this.cashbackConfigModel.findOne({ scope: "global", isActive: true }).sort({ validFrom: -1 });
+    return this.cashbackConfigModel.findOne({ scope: 'global', isActive: true }).sort({ validFrom: -1 });
   }
 
-  /**
-   * Sets or updates the active global cashback/discount configuration.
-   */
   async setGlobalCashbackConfig(dto: {
     firstOrderRate?: number;
     subsequentRate?: number;
     cashbackRate?: number;
     slabs?: { maxAmount: number; cashbackRate: number }[];
   }): Promise<CashbackConfigDocument> {
-    const existing = await this.cashbackConfigModel.findOne({ scope: "global", isActive: true });
+    const existing = await this.cashbackConfigModel.findOne({ scope: 'global', isActive: true });
     if (existing) {
       if (dto.firstOrderRate !== undefined) existing.firstOrderRate = dto.firstOrderRate;
       if (dto.subsequentRate !== undefined) existing.subsequentRate = dto.subsequentRate;
@@ -378,7 +545,7 @@ export class OfferService {
     }
 
     return this.cashbackConfigModel.create({
-      scope: "global",
+      scope: 'global',
       userId: null,
       cashbackRate: dto.cashbackRate !== undefined ? dto.cashbackRate : 0.10,
       firstOrderRate: dto.firstOrderRate !== undefined ? dto.firstOrderRate : 0.15,
@@ -390,6 +557,143 @@ export class OfferService {
   }
 
   async listCoupons(): Promise<CouponDocument[]> {
-    return this.couponModel.find().sort({ createdAt: -1 });
+    return this.couponModel.find({ isDeleted: false }).populate('sellerId', 'shopName ownerName phone').sort({ createdAt: -1 });
+  }
+
+  async getStoreCouponsForUser(
+    sellerId: string,
+    userId?: string,
+  ): Promise<any[]> {
+    if (!sellerId || !Types.ObjectId.isValid(sellerId)) {
+      throw new BadRequestException('Valid seller ID is required');
+    }
+
+    const now = new Date();
+    const query: any = {
+      $or: [{ sellerId: new Types.ObjectId(sellerId) }, { sellerId: null }],
+      isActive: true,
+      isDeleted: false,
+      validFrom: { $lte: now },
+      $and: [
+        {
+          $or: [
+            { validTill: null },
+            { validTill: { $exists: false } },
+            { validTill: { $gte: now } },
+          ],
+        },
+      ],
+    };
+
+    const coupons = await this.couponModel
+      .find(query)
+      .sort({ discountValue: -1, createdAt: -1 });
+
+    let pastOrderCount = 0;
+    const userUsages: Record<string, number> = {};
+
+    if (userId && Types.ObjectId.isValid(userId)) {
+      pastOrderCount = await this.transactionModel.countDocuments({
+        customerId: new Types.ObjectId(userId),
+        sellerId: new Types.ObjectId(sellerId),
+        paymentStatus: 'paid',
+      });
+
+      const usages = await this.couponUsageModel.find({
+        userId: new Types.ObjectId(userId),
+        couponId: { $in: coupons.map((c) => c._id) },
+      });
+
+      for (const u of usages) {
+        userUsages[u.couponId.toString()] = u.usageCount;
+      }
+    }
+
+    return coupons.map((coupon) => {
+      const terms: string[] = [];
+
+      if (coupon.discountType === 'percent') {
+        if (coupon.maxDiscountAmount && coupon.maxDiscountAmount > 0) {
+          terms.push(
+            'Get ' + coupon.discountValue + '% discount up to ₹' + coupon.maxDiscountAmount + ' on your bill',
+          );
+        } else {
+          terms.push('Get ' + coupon.discountValue + '% discount on your total bill');
+        }
+      } else {
+        terms.push('Get flat ₹' + coupon.discountValue + ' off on your order');
+      }
+
+      if (coupon.minOrderValue > 0) {
+        terms.push('Minimum bill amount of ₹' + coupon.minOrderValue + ' required');
+      } else {
+        terms.push('No minimum order value required');
+      }
+
+      if (coupon.appliesTo === 'first_order') {
+        terms.push('Valid exclusively on your first order with this store');
+      } else if (coupon.appliesTo === 'subsequent_orders') {
+        terms.push('Valid for repeat customers with previous orders');
+      } else {
+        terms.push('Applicable for all orders at this store');
+      }
+
+      terms.push('Redeemable once per customer (' + (coupon.perUserLimit || 1) + ' use per user)');
+
+      if (coupon.usageLimit) {
+        terms.push('Total offer redemption cap of ' + coupon.usageLimit + ' orders');
+      }
+
+      if (coupon.validTill) {
+        const d = new Date(coupon.validTill);
+        terms.push('Valid till ' + d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }));
+      } else {
+        terms.push('Valid for a limited period only');
+      }
+
+      let isEligible = true;
+      let ineligibilityReason = '';
+
+      if (coupon.usageLimit !== null && coupon.usageCount >= coupon.usageLimit) {
+        isEligible = false;
+        ineligibilityReason = 'Coupon redemption limit reached';
+      }
+
+      const userUsedCount = userUsages[coupon._id.toString()] || 0;
+      if (userUsedCount >= coupon.perUserLimit) {
+        isEligible = false;
+        ineligibilityReason = 'You have already used this coupon';
+      }
+
+      if (userId) {
+        if (coupon.appliesTo === 'first_order' && pastOrderCount > 0) {
+          isEligible = false;
+          ineligibilityReason = 'Valid only on your first order with this store';
+        } else if (coupon.appliesTo === 'subsequent_orders' && pastOrderCount === 0) {
+          isEligible = false;
+          ineligibilityReason = 'Valid only for repeat customers';
+        }
+      }
+
+      return {
+        _id: coupon._id,
+        code: coupon.code,
+        title: coupon.title || '',
+        description: coupon.description || '',
+        discountType: coupon.discountType,
+        discountValue: coupon.discountValue,
+        minOrderValue: coupon.minOrderValue,
+        maxDiscountAmount: coupon.maxDiscountAmount,
+        appliesTo: coupon.appliesTo,
+        usageLimit: coupon.usageLimit,
+        usageCount: coupon.usageCount,
+        validFrom: coupon.validFrom,
+        validTill: coupon.validTill,
+        terms,
+        isEligible,
+        ineligibilityReason,
+      };
+    });
   }
 }
+

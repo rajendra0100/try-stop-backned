@@ -92,11 +92,12 @@ export class PaymentService {
         dto.couponCode,
         dto.totalAmount,
         customerId,
+        dto.sellerId,
       );
       couponDiscount = couponResult.discountAmount;
     }
 
-    const effectiveTotal = dto.totalAmount - couponDiscount;
+    const effectiveTotal = Math.round((dto.totalAmount - couponDiscount) * 100) / 100;
 
     const customer = await this.userModel.findById(customerId);
     if (!customer) throw new NotFoundException('Customer not found');
@@ -112,9 +113,10 @@ export class PaymentService {
       if (useVoucherAmount > effectiveTotal) {
         useVoucherAmount = effectiveTotal;
       }
+      useVoucherAmount = Math.round(useVoucherAmount * 100) / 100;
     }
 
-    const remainingTotal = effectiveTotal - useVoucherAmount;
+    const remainingTotal = Math.round((effectiveTotal - useVoucherAmount) * 100) / 100;
 
     // 4. Resolve Cashback (wallet) usage (capped at 75% of remaining total)
     let useWalletAmount = dto.useWalletAmount || 0;
@@ -135,10 +137,11 @@ export class PaymentService {
           `Wallet usage capped to ₹${useWalletAmount} (${effectiveWalletCap * 100}% of remaining ₹${remainingTotal})`,
         );
       }
+      useWalletAmount = Math.round(useWalletAmount * 100) / 100;
     }
 
     // 5. Calculate amounts
-    const amountToChargeOnline = remainingTotal - useWalletAmount;
+    const amountToChargeOnline = Math.max(0, Math.round((remainingTotal - useWalletAmount) * 100) / 100);
 
     // 6. Calculate full financial breakdown
     const breakdown = await this.calculateBreakdown(

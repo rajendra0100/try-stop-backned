@@ -2,10 +2,6 @@ import {
   IsNotEmpty, IsNumber, IsOptional, IsString, IsMongoId, Min, Max,
 } from 'class-validator';
 
-/**
- * DTO for creating a review.
- * Customer-only — must own a successful transaction with the sellerId.
- */
 export class CreateReviewDto {
   @IsNotEmpty()
   @IsMongoId()
@@ -17,7 +13,7 @@ export class CreateReviewDto {
 
   @IsNotEmpty()
   @IsNumber()
-  @Min(1)
+  @Min(0.5)
   @Max(5)
   rating: number;
 
