@@ -37,21 +37,38 @@ export class FcmNotificationService {
       let serviceAccount: any = null;
 
       // 1. Direct JSON string from Environment Variable (Vercel / Production)
-      const serviceAccountJson =
+      const rawJson =
         this.configService.get<string>('FIREBASE_SERVICE_ACCOUNT_JSON') ||
-        this.configService.get<string>('FIREBASE_SERVICE_ACCOUNT');
+        this.configService.get<string>('FIREBASE_SERVICE_ACCOUNT') ||
+        process.env.FIREBASE_SERVICE_ACCOUNT_JSON ||
+        process.env.FIREBASE_SERVICE_ACCOUNT;
 
-      if (serviceAccountJson) {
+      if (rawJson) {
         try {
-          const trimmed = serviceAccountJson.trim();
+          let trimmed = rawJson.trim();
+          // Strip wrapping single or double quotes if present (e.g. from .env copy-paste)
+          if (
+            (trimmed.startsWith("'") && trimmed.endsWith("'")) ||
+            (trimmed.startsWith('"') && trimmed.endsWith('"'))
+          ) {
+            trimmed = trimmed.slice(1, -1).trim();
+          }
+
           if (trimmed.startsWith('{')) {
             serviceAccount = JSON.parse(trimmed);
           } else {
-            const decoded = Buffer.from(trimmed, 'base64').toString('utf-8');
-            serviceAccount = JSON.parse(decoded);
+            try {
+              const decoded = Buffer.from(trimmed, 'base64').toString('utf-8');
+              if (decoded.trim().startsWith('{')) {
+                serviceAccount = JSON.parse(decoded.trim());
+              }
+            } catch (_) {}
+            if (!serviceAccount) {
+              serviceAccount = JSON.parse(trimmed);
+            }
           }
-          this.logger.log('Loaded Firebase service account from Environment Variable');
-        } catch (parseErr) {
+          this.logger.log(`Loaded Firebase service account for project: ${serviceAccount?.project_id || 'unknown'}`);
+        } catch (parseErr: any) {
           this.logger.error('Failed to parse FIREBASE_SERVICE_ACCOUNT_JSON:', parseErr?.message);
         }
       }
