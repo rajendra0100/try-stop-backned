@@ -112,6 +112,26 @@ class EnvironmentVariables {
   @IsString()
   FIREBASE_SERVICE_ACCOUNT_PATH?: string;
 
+  @IsOptional()
+  @IsString()
+  FIREBASE_SERVICE_ACCOUNT_JSON?: string;
+
+  @IsOptional()
+  @IsString()
+  FIREBASE_SERVICE_ACCOUNT?: string;
+
+  @IsOptional()
+  @IsString()
+  FIREBASE_PROJECT_ID?: string;
+
+  @IsOptional()
+  @IsString()
+  FIREBASE_CLIENT_EMAIL?: string;
+
+  @IsOptional()
+  @IsString()
+  FIREBASE_PRIVATE_KEY?: string;
+
   // ── Google Maps API ────────────────────────────────────────────────────────
   @IsOptional()
   @IsString()

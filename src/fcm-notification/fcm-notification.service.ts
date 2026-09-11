@@ -6,7 +6,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import * as path from 'path';
 import * as fs from 'fs';
-import { initializeApp, cert } from 'firebase-admin/app';
+import { initializeApp, cert, getApps } from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
 
 import { User, UserDocument } from '../auth/schemas/user.schema';
@@ -28,25 +28,76 @@ export class FcmNotificationService {
 
   private initializeFirebase(): void {
     try {
-      const rawPath =
-        this.configService.get<string>('FIREBASE_SERVICE_ACCOUNT_PATH') ||
-        'config/firebase-service-account.json';
+      if (getApps().length > 0) {
+        this.firebaseInitialized = true;
+        this.logger.log('Firebase Admin SDK already initialized');
+        return;
+      }
 
-      const resolvedPath = path.isAbsolute(rawPath)
-        ? rawPath
-        : path.resolve(process.cwd(), rawPath);
+      let serviceAccount: any = null;
 
-      if (fs.existsSync(resolvedPath)) {
-        const serviceAccount = require(resolvedPath);
+      // 1. Direct JSON string from Environment Variable (Vercel / Production)
+      const serviceAccountJson =
+        this.configService.get<string>('FIREBASE_SERVICE_ACCOUNT_JSON') ||
+        this.configService.get<string>('FIREBASE_SERVICE_ACCOUNT');
+
+      if (serviceAccountJson) {
+        try {
+          const trimmed = serviceAccountJson.trim();
+          if (trimmed.startsWith('{')) {
+            serviceAccount = JSON.parse(trimmed);
+          } else {
+            const decoded = Buffer.from(trimmed, 'base64').toString('utf-8');
+            serviceAccount = JSON.parse(decoded);
+          }
+          this.logger.log('Loaded Firebase service account from Environment Variable');
+        } catch (parseErr) {
+          this.logger.error('Failed to parse FIREBASE_SERVICE_ACCOUNT_JSON:', parseErr?.message);
+        }
+      }
+
+      // 2. Individual environment variables
+      if (!serviceAccount) {
+        const projectId = this.configService.get<string>('FIREBASE_PROJECT_ID');
+        const clientEmail = this.configService.get<string>('FIREBASE_CLIENT_EMAIL');
+        const privateKey = this.configService.get<string>('FIREBASE_PRIVATE_KEY');
+
+        if (projectId && clientEmail && privateKey) {
+          serviceAccount = {
+            projectId,
+            clientEmail,
+            privateKey: privateKey.replace(/\n/g, '\n'),
+          };
+          this.logger.log('Loaded Firebase service account from individual environment variables');
+        }
+      }
+
+      // 3. Fallback to file path on disk (for Local Dev)
+      if (!serviceAccount) {
+        const rawPath =
+          this.configService.get<string>('FIREBASE_SERVICE_ACCOUNT_PATH') ||
+          'config/firebase-service-account.json';
+
+        const resolvedPath = path.isAbsolute(rawPath)
+          ? rawPath
+          : path.resolve(process.cwd(), rawPath);
+
+        if (fs.existsSync(resolvedPath)) {
+          serviceAccount = JSON.parse(fs.readFileSync(resolvedPath, 'utf8'));
+          this.logger.log(`Loaded Firebase service account from file: ${resolvedPath}`);
+        } else {
+          this.logger.warn(
+            `No Firebase credentials found (checked FIREBASE_SERVICE_ACCOUNT_JSON, env vars, and file at ${resolvedPath}). Push notifications will be logged but not sent.`,
+          );
+        }
+      }
+
+      if (serviceAccount) {
         initializeApp({
           credential: cert(serviceAccount),
         });
         this.firebaseInitialized = true;
-        this.logger.log(`Firebase Admin SDK initialized successfully from ${resolvedPath}`);
-      } else {
-        this.logger.warn(
-          `FIREBASE_SERVICE_ACCOUNT_PATH file not found at ${resolvedPath}. Push notifications will be logged but not sent.`,
-        );
+        this.logger.log('Firebase Admin SDK initialized successfully');
       }
     } catch (error) {
       this.logger.error('Failed to initialize Firebase Admin SDK', error?.message);
