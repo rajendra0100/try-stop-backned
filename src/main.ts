@@ -1,3 +1,12 @@
+
+// Prevent unhandled connection errors (e.g., Redis on serverless) from crashing the serverless worker
+process.on('uncaughtException', (err: any) => {
+  if (err?.message?.includes('ECONNREFUSED') || err?.message?.includes('ioredis')) {
+    return;
+  }
+  console.error('Uncaught Exception:', err);
+});
+
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { NestExpressApplication, ExpressAdapter } from '@nestjs/platform-express';

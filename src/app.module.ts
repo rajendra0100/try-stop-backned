@@ -58,14 +58,17 @@ import { PolicyModule } from './policy/policy.module';
       isGlobal: true,
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => {
+        const isVercel = !!process.env.VERCEL;
         const redisUrl = configService.get<string>('REDIS_URL');
-        if (redisUrl && redisUrl.startsWith('redis')) {
+        const isLocalhost = !redisUrl || redisUrl.includes('localhost') || redisUrl.includes('127.0.0.1');
+
+        if (!isVercel && redisUrl && redisUrl.startsWith('redis')) {
           try {
             const store = await redisStore({
               url: redisUrl,
               ttl: 30000,
               maxRetriesPerRequest: 1,
-              retryStrategy: (times: number) => (times > 3 ? null : 500),
+              retryStrategy: (times: number) => (times > 2 ? null : 500),
             });
             return { store };
           } catch (_) {}
@@ -78,23 +81,28 @@ import { PolicyModule } from './policy/policy.module';
     BullModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => {
+        const isVercel = !!process.env.VERCEL;
         const redisUrl = configService.get<string>('REDIS_URL');
-        if (redisUrl && redisUrl.startsWith('redis')) {
+        const isLocalhost = !redisUrl || redisUrl.includes('localhost') || redisUrl.includes('127.0.0.1');
+
+        if (!isVercel && redisUrl && redisUrl.startsWith('redis')) {
           return {
             url: redisUrl,
             redis: {
               maxRetriesPerRequest: 1,
               enableReadyCheck: false,
-              retryStrategy: (times: number) => (times > 3 ? null : 1000),
+              retryStrategy: (times: number) => (times > 2 ? null : 1000),
             },
           };
         }
+
         return {
           redis: {
             host: '127.0.0.1',
             port: 6379,
             maxRetriesPerRequest: 1,
             enableReadyCheck: false,
+            enableOfflineQueue: false,
             retryStrategy: () => null,
             lazyConnect: true,
           },
