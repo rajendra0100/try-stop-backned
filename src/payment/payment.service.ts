@@ -27,6 +27,7 @@ import { WalletService } from '../wallet/wallet.service';
 import { OfferService } from '../offer/offer.service';
 import { VoucherService } from '../voucher/voucher.service';
 import { ReferralService } from '../referral/referral.service';
+import { FcmNotificationService } from '../fcm-notification/fcm-notification.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import * as bcrypt from 'bcrypt';
 
@@ -65,6 +66,7 @@ export class PaymentService {
     @Inject(forwardRef(() => VoucherService))
     private readonly voucherService: VoucherService,
     private readonly referralService: ReferralService,
+    private readonly fcmNotificationService: FcmNotificationService,
   ) {}
 
   // ─── Cashfree Vendor Onboarding (§2.1) ─────────────────────────────────────
@@ -360,47 +362,46 @@ export class PaymentService {
     // Dispatch independent side-effects via BullMQ queue
     // Each is retryable — a failure in one never blocks the others
 
+    // ── Direct Execution (Guarantees execution on serverless/Vercel & local) ──
+    // 1. Direct Wallet debit + Cashback credit + Voucher debit
     try {
-      // 1. Wallet debit (if wallet was used) + Cashback credit + Voucher debit
-      await this.paymentEventsQueue.add(
-        'wallet-operations',
-        {
-          transactionId: txnId,
-          customerId,
-          walletAmountUsed: transaction.walletAmountUsed,
-          voucherAmountUsed: transaction.voucherAmountUsed || 0,
-          cashbackEarned: transaction.cashbackEarned,
-          amountPaidOnline: transaction.amountPaidOnline,
-        },
-        { attempts: 3, backoff: { type: 'exponential', delay: 5000 } },
-      );
+      if (transaction.walletAmountUsed > 0) {
+        await this.walletService.debitForPayment(customerId, transaction.walletAmountUsed, txnId);
+      }
+      if (transaction.voucherAmountUsed && transaction.voucherAmountUsed > 0) {
+        await this.voucherService.debitVoucherBalance(customerId, transaction.voucherAmountUsed, txnId);
+      }
+      if (transaction.cashbackEarned > 0) {
+        await this.walletService.creditCashback(customerId, transaction.cashbackEarned, txnId);
+      }
+    } catch (wErr: any) {
+      this.logger.error(`Direct wallet operations error: ${wErr?.message}`);
+    }
 
-      // 2. Push notifications to customer and seller
-      await this.paymentEventsQueue.add(
-        'send-notifications',
-        {
-          transactionId: txnId,
-          customerId,
-          sellerId,
-          totalAmount: transaction.totalAmount,
-          cashbackEarned: transaction.cashbackEarned,
-          amountPaidOnline: transaction.amountPaidOnline,
-          walletAmountUsed: transaction.walletAmountUsed,
-          voucherAmountUsed: transaction.voucherAmountUsed || 0,
-        },
-        { attempts: 3, backoff: { type: 'exponential', delay: 5000 } },
-      );
+    // 2. Direct Push Notifications to Customer and Seller
+    try {
+      await this.fcmNotificationService.sendPaymentSuccessNotifications({
+        customerId,
+        sellerId,
+        totalAmount: transaction.totalAmount,
+        cashbackEarned: transaction.cashbackEarned,
+        amountPaidOnline: transaction.amountPaidOnline,
+        walletAmountUsed: transaction.walletAmountUsed,
+        transactionId: txnId,
+      });
+      this.logger.log(`Direct push notifications sent for txn ${txnId}`);
+    } catch (notifErr: any) {
+      this.logger.error(`Direct notification error: ${notifErr?.message}`);
+    }
 
-      // 3. Update ranking signal
+    // 3. Update ranking signal & coupon usage
+    try {
       await this.paymentEventsQueue.add(
         'update-ranking-signal',
-        {
-          sellerId,
-        },
+        { sellerId },
         { attempts: 3, backoff: { type: 'exponential', delay: 5000 } },
       );
 
-      // 4. Record coupon usage if applicable
       if (transaction.couponCode) {
         await this.paymentEventsQueue.add(
           'record-coupon-usage',
