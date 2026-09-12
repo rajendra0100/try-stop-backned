@@ -438,27 +438,45 @@ export class FcmNotificationService {
       return;
     }
 
+    const isPayment =
+      data?.sound === 'payment_received' ||
+      data?.type === 'payment_received' ||
+      data?.type === 'payment_success' ||
+      data?.type === 'payment_successful' ||
+      (data?.type && data.type.startsWith('payment'));
+
+    const isCoupon = data?.type === 'seller_coupon';
+    const isSoundNotification = isPayment || isCoupon;
+
+    const androidChannelId = isPayment ? 'trystop_payments' : 'trystop_general_v2';
+    // Sound only for payment and coupon; all other notifications are silent
+    const androidSound = isPayment ? 'payment_received' : (isCoupon ? 'default' : undefined);
+    const apnsSound = isPayment
+      ? (data?.sound?.includes('.') ? data.sound : `${data?.sound || 'payment_received'}.wav`)
+      : (isCoupon ? 'default' : undefined);
+
     try {
-      await getMessaging().send({
+      const message: any = {
         token,
         notification: { title, body },
         data: data || {},
         android: {
           priority: 'high',
           notification: {
-            sound: data?.sound || 'default',
-            channelId: 'trystop_payments',
+            channelId: androidChannelId,
+            ...(isSoundNotification && androidSound ? { sound: androidSound } : {}),
           },
         },
         apns: {
           payload: {
             aps: {
-              sound: data?.sound ? (data.sound.includes('.') ? data.sound : `${data.sound}.wav`) : 'default',
               badge: 1,
+              ...(isSoundNotification && apnsSound ? { sound: apnsSound } : {}),
             },
           },
         },
-      });
+      };
+      await getMessaging().send(message);
     } catch (error) {
       this.logger.error(`Failed to send push notification: ${error?.message}`);
     }
@@ -480,7 +498,19 @@ export class FcmNotificationService {
         topic,
         notification: { title, body },
         data: data || {},
-        android: { priority: 'high' },
+        android: {
+          priority: 'high',
+          notification: {
+            channelId: 'trystop_general_v2',
+          },
+        },
+        apns: {
+          payload: {
+            aps: {
+              badge: 1,
+            },
+          },
+        },
       });
     } catch (error) {
       this.logger.error(`Failed to send topic notification: ${error?.message}`);
