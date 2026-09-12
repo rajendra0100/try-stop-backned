@@ -12,6 +12,7 @@ import { Seller, SellerDocument } from '../auth/schemas/seller.schema';
 import { PlatformConfig, PlatformConfigDocument } from '../payment/schemas/platform-config.schema';
 import { Transaction, TransactionDocument } from '../payment/schemas/transaction.schema';
 import { SetCashbackRateDto, CreateCouponDto, SellerCreateCouponDto, SetWalletCapDto } from './dto/offer.dto';
+import { FcmNotificationService } from '../fcm-notification/fcm-notification.service';
 
 @Injectable()
 export class OfferService {
@@ -25,6 +26,7 @@ export class OfferService {
     @InjectModel(Seller.name) private readonly sellerModel: Model<SellerDocument>,
     @InjectModel(PlatformConfig.name) private readonly platformConfigModel: Model<PlatformConfigDocument>,
     @InjectModel(Transaction.name) private readonly transactionModel: Model<TransactionDocument>,
+    private readonly fcmNotificationService: FcmNotificationService,
   ) {}
 
   private async evaluateCashbackRate(
@@ -162,7 +164,7 @@ export class OfferService {
       throw new BadRequestException('Discount percentage cannot exceed 100%');
     }
 
-    return this.couponModel.create({
+    const createdCoupon = await this.couponModel.create({
       sellerId: new Types.ObjectId(sellerId),
       code,
       title: dto.title?.trim() || '',
@@ -181,6 +183,50 @@ export class OfferService {
       createdBy: 'seller',
       createdById: new Types.ObjectId(sellerId),
     });
+
+    // Notify connected audience (followers + past shoppers) about the new coupon
+    try {
+      const sellerObjectId = new Types.ObjectId(sellerId);
+      const [seller, followers, pastShoppers] = await Promise.all([
+        this.sellerModel.findById(sellerId).select('shopName'),
+        this.userModel.find({ favoriteSellers: sellerObjectId }, '_id'),
+        this.transactionModel.distinct('customerId', {
+          sellerId: sellerObjectId,
+          paymentStatus: 'paid',
+        }),
+      ]);
+
+      const followerIds = followers.map((f) => f._id.toString());
+      const shopperIds = pastShoppers.filter((p) => p !== null && p !== undefined).map((p) => p.toString());
+      const allUserIds = Array.from(new Set([...followerIds, ...shopperIds]));
+
+      if (allUserIds.length > 0) {
+        const shopName = seller?.shopName || 'Store';
+        const discountText =
+          dto.discountType === 'percent'
+            ? `${discountVal}% OFF`
+            : `₹${discountVal} OFF`;
+
+        this.fcmNotificationService.sendToUsers(
+          allUserIds,
+          `New Offer from ${shopName}! 🎁`,
+          `Get ${discountText} with code "${code}" at ${shopName}! Valid now.`,
+          {
+            type: 'seller_coupon',
+            screen: 'SHOP_DETAILS',
+            sellerId: sellerId,
+            sellerName: shopName,
+            couponCode: code,
+          },
+        ).catch((err) => {
+          this.logger.warn(`Failed to dispatch coupon push notification: ${err?.message}`);
+        });
+      }
+    } catch (err: any) {
+      this.logger.warn(`Error calculating connected audience for coupon: ${err?.message}`);
+    }
+
+    return createdCoupon;
   }
 
   async listSellerCoupons(

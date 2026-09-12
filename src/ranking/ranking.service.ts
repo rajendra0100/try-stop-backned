@@ -260,6 +260,7 @@ export class RankingService {
       page,
       limit,
       totalPages: Math.ceil(total / limit),
+      hasMore: page < Math.ceil(total / limit),
       userLocation: lat !== undefined && lng !== undefined ? { lat, lng } : null,
     };
   }

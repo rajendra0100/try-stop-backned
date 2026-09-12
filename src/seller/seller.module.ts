@@ -14,6 +14,7 @@ import {
 } from "../payment/schemas/transaction.schema";
 import { OtpModule } from "../otp/otp.module";
 import { NotificationModule } from "../notification/notification.module";
+import { FcmNotificationModule } from "../fcm-notification/fcm-notification.module";
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { NotificationModule } from "../notification/notification.module";
     ]),
     OtpModule,
     NotificationModule,
+    FcmNotificationModule,
   ],
   controllers: [SellerController],
   providers: [SellerService],

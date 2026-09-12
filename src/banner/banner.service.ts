@@ -104,29 +104,25 @@ export class BannerService {
     bannerId: string,
     userLat: number,
     userLng: number,
-  ): Promise<any[]> {
+    page: number = 1,
+    limit?: number,
+  ): Promise<any> {
     // 1. Fetch the banner
     const banner = await this.bannerModel.findById(bannerId).lean();
     if (!banner) throw new NotFoundException('Banner not found');
 
-    // 2. Read the configurable limit from platform config (admin can set via POST /admin/config)
-    //    Key: 'banner_top_sellers_limit', default: 10
+    // 2. Read the configurable limit from platform config (safe default: 10)
     const limitConfig = await this.platformConfigModel?.findOne({ key: 'banner_top_sellers_limit' });
-    const maxResults = limitConfig ? limitConfig.value : 10;
+    const defaultLimit = limitConfig && Number(limitConfig.value) > 0 ? Number(limitConfig.value) : 10;
+    const effectiveLimit = limit && limit > 0 ? limit : defaultLimit;
 
-    // 3. Read the max distance radius from platform config
-    //    Key: 'banner_max_distance_km', default: 5
+    // 3. Read the max distance radius from platform config (safe default: 5km)
     const distanceConfig = await this.platformConfigModel?.findOne({ key: 'banner_max_distance_km' });
-    const maxDistanceKm = distanceConfig ? distanceConfig.value : 5;
+    const maxDistanceKm = distanceConfig && Number(distanceConfig.value) > 0 ? Number(distanceConfig.value) : 5;
 
     // 4. Build the seller query from the banner's targetFilter
-    const query: any = {
-      verificationStatus: 'approved',
-      'shopAddress.lat': { $exists: true, $ne: null },
-      'shopAddress.lng': { $exists: true, $ne: null },
-    };
+    const query: any = { verificationStatus: 'approved' };
 
-    // If targetType is not 'seller_list', skip filter logic and return all nearby sellers
     const filter = banner.targetType === 'seller_list' ? banner.targetFilter : null;
     if (banner.targetType !== 'seller_list') {
       this.logger.log(
@@ -141,96 +137,147 @@ export class BannerService {
         query.categories = { $in: targetCats };
       }
 
-      // Filter by offer tag
       if (filter.offerTag) {
         query.offerTags = filter.offerTag;
       }
 
-      // Filter by minimum discount
       if (filter.minDiscount && filter.minDiscount > 0) {
         query.discountPercent = { $gte: filter.minDiscount };
       }
 
-      // Override verification status if explicitly set in filter
       if (filter.verificationStatus) {
         query.verificationStatus = filter.verificationStatus;
       }
     }
 
     // 5. Fetch matching sellers
-    const sellers = await this.sellerModel
+    let sellers = await this.sellerModel
       .find(query)
       .select(
-        'shopName ownerName shopLogoUrl shopBannerUrl shopAddress categories avgRating reviewCount rankingScore onlineTxnVolume30d offerTags discountPercent isOpenNow openingHours operatingHoursSchedule',
+        'shopName ownerName shopLogoUrl shopBannerUrl shopAddress categories avgRating reviewCount rankingScore onlineTxnVolume30d offerTags discountPercent minPrice maxPrice productTypes isOpenNow openingHours operatingHoursSchedule shopDescription',
       )
       .lean();
 
-    // 6. Compute distance for all matching sellers
-    const allSellersWithDistance = sellers
-      .map((seller) => {
-        const lat = seller.shopAddress?.lat;
-        const lng = seller.shopAddress?.lng;
-        if (!lat || !lng) return null;
-
-        const distance = this.haversineDistance(userLat, userLng, lat, lng);
-        return {
-          _id: seller._id,
-          shopName: seller.shopName,
-          ownerName: seller.ownerName,
-          shopLogoUrl: seller.shopLogoUrl,
-          shopBannerUrl: seller.shopBannerUrl,
-          shopAddress: seller.shopAddress,
-          categories: seller.categories,
-          avgRating: seller.avgRating,
-          reviewCount: seller.reviewCount,
-          rankingScore: seller.rankingScore,
-          onlineTxnVolume30d: seller.onlineTxnVolume30d,
-          offerTags: seller.offerTags,
-          discountPercent: seller.discountPercent,
-          isOpenNow: seller.isOpenNow,
-          openingHours: seller.openingHours,
-          operatingHoursSchedule: seller.operatingHoursSchedule,
-          distanceKm: Math.round(distance * 10) / 10, // Round to 1 decimal
-        };
-      })
-      .filter((s) => s !== null);
-
-    // 7. Primary: sellers within max distance radius
-    const nearbySellers = allSellersWithDistance
-      .filter((s) => s.distanceKm <= maxDistanceKm)
-      .sort((a, b) => {
-        const rankDiff = (b.rankingScore || 0) - (a.rankingScore || 0);
-        return rankDiff !== 0 ? rankDiff : a.distanceKm - b.distanceKm;
-      })
-      .slice(0, maxResults);
-
-    // 8. Fallback: if no sellers found within distance, return top-ranked sellers regardless of distance
-    let finalSellers = nearbySellers;
-    if (finalSellers.length === 0 && allSellersWithDistance.length > 0) {
+    // Fallback A: If specific targetFilter matched 0 sellers, fetch all approved sellers
+    if (sellers.length === 0 && filter) {
       this.logger.warn(
-        `Banner "${banner.title}": no sellers within ${maxDistanceKm}km — using fallback (top-ranked sellers regardless of distance)`,
+        `Banner "${banner.title}": 0 sellers matched targetFilter — using fallback (all approved sellers)`,
       );
-      finalSellers = allSellersWithDistance
-        .sort((a, b) => {
-          const rankDiff = (b.rankingScore || 0) - (a.rankingScore || 0);
-          return rankDiff !== 0 ? rankDiff : a.distanceKm - b.distanceKm;
-        })
-        .slice(0, maxResults);
+      sellers = await this.sellerModel
+        .find({ verificationStatus: 'approved' })
+        .select(
+          'shopName ownerName shopLogoUrl shopBannerUrl shopAddress categories avgRating reviewCount rankingScore onlineTxnVolume30d offerTags discountPercent minPrice maxPrice productTypes isOpenNow openingHours operatingHoursSchedule shopDescription',
+        )
+        .lean();
     }
 
+    // 6. Compute distance for all matching sellers
+    const allSellersWithDistance = sellers.map((seller) => {
+      const lat = seller.shopAddress?.lat;
+      const lng = seller.shopAddress?.lng;
+      const hasCoords =
+        lat !== undefined &&
+        lat !== null &&
+        lng !== undefined &&
+        lng !== null &&
+        userLat !== undefined &&
+        userLng !== undefined &&
+        userLat !== 0 &&
+        userLng !== 0;
+      const distance = hasCoords
+        ? this.haversineDistance(userLat, userLng, Number(lat), Number(lng))
+        : null;
+
+      return {
+        _id: seller._id,
+        shopName: seller.shopName,
+        ownerName: seller.ownerName,
+        shopLogoUrl: seller.shopLogoUrl,
+        shopBannerUrl: seller.shopBannerUrl,
+        shopAddress: seller.shopAddress,
+        categories: seller.categories,
+        avgRating: seller.avgRating,
+        reviewCount: seller.reviewCount,
+        rankingScore: seller.rankingScore,
+        onlineTxnVolume30d: seller.onlineTxnVolume30d,
+        offerTags: seller.offerTags,
+        discountPercent: seller.discountPercent,
+        minPrice: seller.minPrice,
+        maxPrice: seller.maxPrice,
+        productTypes: seller.productTypes,
+        isOpenNow: seller.isOpenNow,
+        openingHours: seller.openingHours,
+        operatingHoursSchedule: seller.operatingHoursSchedule,
+        shopDescription: seller.shopDescription,
+        distanceKm: distance !== null ? Math.round(distance * 10) / 10 : null,
+      };
+    });
+
+    // ─── 3-TIER LAYERED FALLBACK STRATEGY ───
+
+    // Tier 1: Immediate Neighborhood (<= maxDistanceKm, e.g. 5km)
+    // Sorted by top ranking score first, with distance as tiebreaker
+    const tier1Nearby = allSellersWithDistance
+      .filter((s) => s.distanceKm !== null && s.distanceKm <= maxDistanceKm)
+      .sort((a, b) => {
+        const rankDiff = (b.rankingScore || 0) - (a.rankingScore || 0);
+        return rankDiff !== 0 ? rankDiff : ((a.distanceKm || 0) - (b.distanceKm || 0));
+      });
+
+    let candidateSellers: any[] = [];
+    let strategyUsed = 'Tier 1 (Within ' + maxDistanceKm + 'km)';
+
+    if (tier1Nearby.length > 0) {
+      candidateSellers = tier1Nearby;
+    } else {
+      // Tier 2: Mid-Range City Fallback (<= 100km)
+      // If user is slightly farther away, prioritize nearest within city + high ranking
+      const tier2MidRange = allSellersWithDistance
+        .filter((s) => s.distanceKm !== null && s.distanceKm <= 100)
+        .sort((a, b) => {
+          if (a.distanceKm !== b.distanceKm) return (a.distanceKm || 0) - (b.distanceKm || 0);
+          return (b.rankingScore || 0) - (a.rankingScore || 0);
+        });
+
+      if (tier2MidRange.length > 0) {
+        candidateSellers = tier2MidRange;
+        strategyUsed = 'Tier 2 (City Radius <= 100km)';
+      } else {
+        // Tier 3: Global / Out of Region Fallback (> 100km or no coords)
+        // Show the platform's Top-Rated Approved Stores (highest ranking score first)
+        candidateSellers = allSellersWithDistance
+          .sort((a, b) => {
+            const rankDiff = (b.rankingScore || 0) - (a.rankingScore || 0);
+            if (rankDiff !== 0) return rankDiff;
+            if (a.distanceKm === null) return 1;
+            if (b.distanceKm === null) return -1;
+            return (a.distanceKm || 0) - (b.distanceKm || 0);
+          });
+        strategyUsed = 'Tier 3 (Top Rated Overall Platform Fallback)';
+      }
+    }
+
+    // Paginate in memory
+    const total = candidateSellers.length;
+    const startIndex = (page - 1) * effectiveLimit;
+    const paginatedSellers = candidateSellers.slice(startIndex, startIndex + effectiveLimit);
+
     // Enrich sellers with clean subcategory names
-    const enrichedSellers = await this.enrichSellersWithSubcategoryNames(finalSellers);
+    const enrichedSellers = await this.enrichSellersWithSubcategoryNames(paginatedSellers);
 
     this.logger.log(
-      `Banner "${banner.title}": found ${enrichedSellers.length} sellers (limit=${maxResults}, maxDist=${maxDistanceKm}km, fallback=${finalSellers !== nearbySellers}) for user at (${userLat}, ${userLng})`,
+      `Banner "${banner.title}": returning ${enrichedSellers.length}/${total} shops (page ${page}, limit ${effectiveLimit}) via ${strategyUsed} for user at (${userLat}, ${userLng})`,
     );
 
-    return enrichedSellers;
+    return {
+      sellers: enrichedSellers,
+      total,
+      page,
+      limit: effectiveLimit,
+      totalPages: Math.ceil(total / effectiveLimit),
+      hasMore: startIndex + effectiveLimit < total,
+    };
   }
-
-  /**
-   * Haversine formula — calculates distance between two lat/lng points in kilometers.
-   */
   private haversineDistance(
     lat1: number,
     lng1: number,

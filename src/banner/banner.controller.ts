@@ -48,12 +48,16 @@ export class BannerController {
   @Get(':id/sellers')
   async getSellersByBanner(
     @Param('id') id: string,
-    @Query('lat') lat: string,
-    @Query('lng') lng: string,
+    @Query('lat') lat?: string,
+    @Query('lng') lng?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
   ) {
-    const userLat = parseFloat(lat) || 0;
-    const userLng = parseFloat(lng) || 0;
-    return this.bannerService.getSellersByBanner(id, userLat, userLng);
+    const userLat = lat !== undefined ? parseFloat(lat) : 0;
+    const userLng = lng !== undefined ? parseFloat(lng) : 0;
+    const pageNum = page ? Math.max(1, parseInt(page, 10) || 1) : 1;
+    const limitNum = limit ? Math.max(1, parseInt(limit, 10) || 10) : undefined;
+    return this.bannerService.getSellersByBanner(id, userLat, userLng, pageNum, limitNum);
   }
 
   /**

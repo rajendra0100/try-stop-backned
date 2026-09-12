@@ -163,6 +163,78 @@ export class FcmNotificationService {
     this.logger.log(`Push notification sent to user ${userId}: "${title}"`);
   }
 
+  async sendToUsers(
+    userIds: string[],
+    title: string,
+    body: string,
+    data?: Record<string, string>,
+  ): Promise<number> {
+    if (!userIds || userIds.length === 0) return 0;
+
+    // Deduplicate valid ObjectIds
+    const validIds = Array.from(
+      new Set(userIds.filter((id) => id && Types.ObjectId.isValid(id))),
+    ).map((id) => new Types.ObjectId(id));
+
+    if (validIds.length === 0) return 0;
+
+    // 1. Bulk persist in-app notification into all matching User documents
+    try {
+      await this.userModel.updateMany(
+        { _id: { $in: validIds } },
+        {
+          $push: {
+            notifications: {
+              $each: [
+                {
+                  title,
+                  message: body,
+                  type: data?.type || 'general',
+                  data: data || {},
+                  isRead: false,
+                  createdAt: new Date(),
+                },
+              ],
+              $position: 0,
+              $slice: 100,
+            },
+          },
+        },
+      );
+    } catch (err: any) {
+      this.logger.warn(`Failed to bulk persist in-app notifications: ${err?.message}`);
+    }
+
+    // 2. Fetch all users with FCM tokens and deliver push notifications
+    try {
+      const usersWithToken = await this.userModel
+        .find({
+          _id: { $in: validIds },
+          fcmToken: { $exists: true, $ne: null },
+        })
+        .select('fcmToken');
+
+      const tokens = usersWithToken
+        .map((u) => u.fcmToken)
+        .filter((t): t is string => typeof t === 'string' && t.trim().length > 0);
+
+      if (tokens.length > 0) {
+        const BATCH_SIZE = 500;
+        for (let i = 0; i < tokens.length; i += BATCH_SIZE) {
+          const batchTokens = tokens.slice(i, i + BATCH_SIZE);
+          await Promise.allSettled(
+            batchTokens.map((token) => this.sendToToken(token, title, body, data)),
+          );
+        }
+        this.logger.log(`Multicast push notification sent to ${tokens.length}/${validIds.length} users: "${title}"`);
+      }
+    } catch (err: any) {
+      this.logger.warn(`Failed to send multicast push notifications: ${err?.message}`);
+    }
+
+    return validIds.length;
+  }
+
   async sendToSeller(
     sellerId: string,
     title: string,

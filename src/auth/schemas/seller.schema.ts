@@ -359,6 +359,28 @@ export class Seller {
     isRead?: boolean;
     createdAt: Date;
   }[];
+
+  /** History of custom notifications broadcast by this seller to their connected audience */
+  @Prop({
+    type: [
+      {
+        title: { type: String, required: true },
+        message: { type: String, required: true },
+        tag: { type: String, default: 'Special Offer' },
+        recipientsCount: { type: Number, default: 0 },
+        sentAt: { type: Date, default: Date.now },
+      },
+    ],
+    default: [],
+  })
+  broadcastHistory: {
+    _id?: any;
+    title: string;
+    message: string;
+    tag?: string;
+    recipientsCount: number;
+    sentAt: Date;
+  }[];
 }
 
 export const SellerSchema = SchemaFactory.createForClass(Seller);

@@ -17,6 +17,7 @@ import {
 import { Transaction, TransactionDocument } from "../payment/schemas/transaction.schema";
 import { OtpService } from "../otp/otp.service";
 import { NotificationService } from "../notification/notification.service";
+import { FcmNotificationService } from "../fcm-notification/fcm-notification.service";
 import {
   OnboardStaffDto,
   VerifyStaffOtpDto,
@@ -47,6 +48,7 @@ export class SellerService {
     private readonly transactionModel: Model<TransactionDocument>,
     private readonly otpService: OtpService,
     private readonly notificationService: NotificationService,
+    private readonly fcmNotificationService: FcmNotificationService,
   ) {}
 
   /**
@@ -339,6 +341,28 @@ export class SellerService {
     // Prepend so newest stories appear first
     seller.stories = [...createdStories, ...seller.stories] as any;
     await seller.save();
+
+    // Trigger notification to connected audience (followers + past shoppers)
+    this.getSellerConnectedAudience(sellerId)
+      .then(async ({ userIds }) => {
+        if (userIds.length > 0) {
+          const shopName = seller.shopName || 'Store';
+          await this.fcmNotificationService.sendToUsers(
+            userIds,
+            `New Story from ${shopName}! 📸`,
+            `${shopName} added a new story update. Tap to view!`,
+            {
+              type: 'seller_story',
+              screen: 'SHOP_DETAILS',
+              sellerId: seller._id.toString(),
+              sellerName: shopName,
+            },
+          );
+        }
+      })
+      .catch((err) => {
+        this.logger.warn(`Failed to dispatch story notification: ${err?.message}`);
+      });
 
     return {
       success: true,
@@ -777,6 +801,34 @@ export class SellerService {
     }
 
     await seller.save();
+
+    // Trigger notification to connected audience on new catalog/media additions
+    if (
+      (dto.shopImages && dto.shopImages.length > 0) ||
+      (dto.shopVideos && dto.shopVideos.length > 0)
+    ) {
+      this.getSellerConnectedAudience(sellerId)
+        .then(async ({ userIds }) => {
+          if (userIds.length > 0) {
+            const shopName = seller.shopName || 'Store';
+            await this.fcmNotificationService.sendToUsers(
+              userIds,
+              `New Collection at ${shopName}! ✨`,
+              `${shopName} updated their catalog & gallery with new styles. Check out the latest arrivals!`,
+              {
+                type: 'seller_post',
+                screen: 'SHOP_DETAILS',
+                sellerId: seller._id.toString(),
+                sellerName: shopName,
+              },
+            );
+          }
+        })
+        .catch((err) => {
+          this.logger.warn(`Failed to dispatch media update notification: ${err?.message}`);
+        });
+    }
+
     return {
       success: true,
       message: "Shop media updated successfully",
@@ -1230,6 +1282,143 @@ export class SellerService {
           canAccessDashboard: Boolean(updatedStaff?.permissions?.canAccessDashboard ?? false),
         },
       },
+    };
+  }
+
+  /**
+   * Get all connected customer user IDs for a seller (Followers + Past Shoppers)
+   */
+  async getSellerConnectedAudience(sellerId: string): Promise<{
+    userIds: string[];
+    followersCount: number;
+    shoppersCount: number;
+  }> {
+    const sellerObjectId = new Types.ObjectId(sellerId);
+
+    const [followers, pastShoppers] = await Promise.all([
+      this.userModel.find({ favoriteSellers: sellerObjectId }, '_id'),
+      this.transactionModel.distinct('customerId', {
+        sellerId: sellerObjectId,
+        paymentStatus: 'paid',
+      }),
+    ]);
+
+    const followerIds = followers.map((f) => f._id.toString());
+    const shopperIds = pastShoppers
+      .filter((p) => p !== null && p !== undefined)
+      .map((p) => p.toString());
+
+    const allUserIds = Array.from(new Set([...followerIds, ...shopperIds]));
+
+    return {
+      userIds: allUserIds,
+      followersCount: followerIds.length,
+      shoppersCount: shopperIds.length,
+    };
+  }
+
+  /**
+   * Get past broadcast notification history for seller with pagination
+   */
+  async getBroadcastHistory(sellerId: string, page = 1, limit = 10) {
+    const seller = await this.sellerModel.findById(sellerId).select('broadcastHistory');
+    if (!seller) {
+      throw new NotFoundException('Seller not found');
+    }
+    const allHistory = (seller.broadcastHistory || []).sort(
+      (a: any, b: any) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime(),
+    );
+
+    const pageNum = Math.max(1, Number(page) || 1);
+    const limitNum = Math.max(1, Number(limit) || 10);
+    const skip = (pageNum - 1) * limitNum;
+    const paginatedItems = allHistory.slice(skip, skip + limitNum);
+    const total = allHistory.length;
+    const totalPages = Math.ceil(total / limitNum) || 1;
+    const hasMore = pageNum < totalPages;
+
+    return {
+      success: true,
+      data: {
+        history: paginatedItems,
+        total,
+        page: pageNum,
+        limit: limitNum,
+        totalPages,
+        hasMore,
+      },
+      history: paginatedItems,
+      total,
+      page: pageNum,
+      limit: limitNum,
+      totalPages,
+      hasMore,
+    };
+  }
+
+  /**
+   * Send custom broadcast notification to all connected customers
+   */
+  async sendSellerBroadcast(
+    sellerId: string,
+    dto: { title: string; message: string; tag?: string },
+  ) {
+    if (!dto.title || !dto.title.trim()) {
+      throw new BadRequestException('Notification title is required');
+    }
+    if (!dto.message || !dto.message.trim()) {
+      throw new BadRequestException('Notification message is required');
+    }
+
+    const seller = await this.sellerModel.findById(sellerId);
+    if (!seller) {
+      throw new NotFoundException('Seller not found');
+    }
+
+    const audience = await this.getSellerConnectedAudience(sellerId);
+    const shopName = seller.shopName || 'Store';
+    const tag = dto.tag || 'Special Offer';
+
+    if (audience.userIds.length > 0) {
+      await this.fcmNotificationService.sendToUsers(
+        audience.userIds,
+        dto.title.trim(),
+        dto.message.trim(),
+        {
+          type: 'seller_broadcast',
+          screen: 'SHOP_DETAILS',
+          sellerId: seller._id.toString(),
+          sellerName: shopName,
+          tag,
+        },
+      );
+    }
+
+    if (!seller.broadcastHistory) {
+      seller.broadcastHistory = [];
+    }
+
+    const newBroadcast = {
+      _id: new Types.ObjectId(),
+      title: dto.title.trim(),
+      message: dto.message.trim(),
+      tag,
+      recipientsCount: audience.userIds.length,
+      sentAt: new Date(),
+    };
+
+    seller.broadcastHistory.unshift(newBroadcast as any);
+    seller.markModified('broadcastHistory');
+    await seller.save();
+
+    return {
+      success: true,
+      message: `Notification broadcasted to ${audience.userIds.length} customers successfully`,
+      data: {
+        broadcast: newBroadcast,
+        recipientsCount: audience.userIds.length,
+      },
+      recipientsCount: audience.userIds.length,
     };
   }
 }

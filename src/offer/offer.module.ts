@@ -10,9 +10,11 @@ import { User, UserSchema } from '../auth/schemas/user.schema';
 import { Seller, SellerSchema } from '../auth/schemas/seller.schema';
 import { PlatformConfig, PlatformConfigSchema } from '../payment/schemas/platform-config.schema';
 import { Transaction, TransactionSchema } from '../payment/schemas/transaction.schema';
+import { FcmNotificationModule } from '../fcm-notification/fcm-notification.module';
 
 @Module({
   imports: [
+    FcmNotificationModule,
     MongooseModule.forFeature([
       { name: CashbackConfig.name, schema: CashbackConfigSchema },
       { name: Coupon.name, schema: CouponSchema },

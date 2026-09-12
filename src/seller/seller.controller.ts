@@ -345,4 +345,27 @@ export class SellerController {
       body.value,
     );
   }
+
+  /** Get broadcast notifications history with pagination */
+  @UseGuards(JwtAuthGuard)
+  @Get("broadcast/history")
+  async getBroadcastHistory(
+    @CurrentUser() user: any,
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+  ) {
+    const sellerId = user._id || user.id || user.sub;
+    return this.sellerService.getBroadcastHistory(sellerId.toString(), page, limit);
+  }
+
+  /** Send broadcast notification to all connected customers */
+  @UseGuards(JwtAuthGuard)
+  @Post("broadcast")
+  async sendBroadcast(
+    @CurrentUser() user: any,
+    @Body() dto: { title: string; message: string; tag?: string },
+  ) {
+    const sellerId = user._id || user.id || user.sub;
+    return this.sellerService.sendSellerBroadcast(sellerId.toString(), dto);
+  }
 }
