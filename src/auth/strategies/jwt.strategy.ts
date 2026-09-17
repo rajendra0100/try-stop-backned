@@ -32,8 +32,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
-  async validate(payload: { sub: string; role: Role }): Promise<AuthenticatedUser> {
-    const { sub, role } = payload;
+  async validate(payload: { sub: string; role: Role; isStaff?: boolean; staffId?: string; staffPhone?: string }): Promise<AuthenticatedUser> {
+    const { sub, role, isStaff, staffId, staffPhone } = payload;
     let user: AuthenticatedUser | null = null;
 
     switch (role) {
@@ -42,6 +42,11 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         break;
       case Role.SELLER:
         user = await this.sellerModel.findById(sub).select('-password');
+        if (user && isStaff) {
+          (user as any).isStaff = true;
+          (user as any).staffId = staffId;
+          (user as any).staffPhone = staffPhone;
+        }
         break;
       case Role.SUPERADMIN:
       case Role.SUBADMIN:

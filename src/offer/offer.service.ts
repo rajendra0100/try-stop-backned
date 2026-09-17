@@ -213,10 +213,12 @@ export class OfferService {
           `Get ${discountText} with code "${code}" at ${shopName}! Valid now.`,
           {
             type: 'seller_coupon',
-            screen: 'SHOP_DETAILS',
-            sellerId: sellerId,
+            screen: 'APPLY_COUPON',
+            sellerId: sellerId?.toString ? sellerId.toString() : String(sellerId),
             sellerName: shopName,
             couponCode: code,
+            sound: 'default',
+            channelId: 'trystop_coupons',
           },
         ).catch((err) => {
           this.logger.warn(`Failed to dispatch coupon push notification: ${err?.message}`);

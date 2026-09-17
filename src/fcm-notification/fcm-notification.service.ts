@@ -448,29 +448,50 @@ export class FcmNotificationService {
     const isCoupon = data?.type === 'seller_coupon';
     const isSoundNotification = isPayment || isCoupon;
 
-    const androidChannelId = isPayment ? 'trystop_payments' : 'trystop_general_v2';
-    // Sound only for payment and coupon; all other notifications are silent
-    const androidSound = isPayment ? 'payment_received' : (isCoupon ? 'default' : undefined);
+    const androidChannelId = isPayment
+      ? 'trystop_payments'
+      : (isCoupon ? 'trystop_coupons' : 'trystop_general_v2');
+
+    // Sound: payment uses custom chime, coupon uses phone's default notification sound
+    const paymentSoundFile = data?.sound?.includes('.') ? data.sound : `${data?.sound || 'payment_received'}`;
     const apnsSound = isPayment
-      ? (data?.sound?.includes('.') ? data.sound : `${data?.sound || 'payment_received'}.wav`)
+      ? (paymentSoundFile.includes('.') ? paymentSoundFile : `${paymentSoundFile}.wav`)
       : (isCoupon ? 'default' : undefined);
 
     try {
+      // Build Android notification config
+      const androidNotification: any = {
+        channelId: androidChannelId,
+        notificationPriority: isSoundNotification ? 'PRIORITY_MAX' : 'PRIORITY_DEFAULT',
+        visibility: 'PUBLIC',
+      };
+
+      if (isPayment) {
+        androidNotification.sound = paymentSoundFile;
+      } else if (isCoupon) {
+        androidNotification.defaultSound = true;
+        androidNotification.defaultVibrateTimings = true;
+        androidNotification.sound = 'default';
+      }
+
       const message: any = {
         token,
         notification: { title, body },
         data: data || {},
         android: {
-          priority: 'high',
-          notification: {
-            channelId: androidChannelId,
-            ...(isSoundNotification && androidSound ? { sound: androidSound } : {}),
-          },
+          priority: 'high' as const,
+          notification: androidNotification,
         },
         apns: {
+          headers: {
+            'apns-priority': isSoundNotification ? '10' : '5',
+            'apns-push-type': 'alert',
+          },
           payload: {
             aps: {
+              alert: { title, body },
               badge: 1,
+              'mutable-content': 1,
               ...(isSoundNotification && apnsSound ? { sound: apnsSound } : {}),
             },
           },
@@ -505,8 +526,16 @@ export class FcmNotificationService {
           },
         },
         apns: {
+          headers: {
+            'apns-priority': '5',
+            'apns-push-type': 'alert',
+          },
           payload: {
             aps: {
+              alert: {
+                title,
+                body,
+              },
               badge: 1,
             },
           },

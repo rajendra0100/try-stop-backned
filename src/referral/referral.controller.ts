@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Body, Param, UseGuards, Request } from '@nestjs/common';
+import { Controller, Post, Get, Body, Param, UseGuards, Request, BadRequestException } from '@nestjs/common';
 import { ReferralService } from './referral.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -15,9 +15,13 @@ export class ReferralController {
    */
   @UseGuards(JwtAuthGuard)
   @Post('register-claim')
-  async claimReferral(@Request() req: any, @Body('referrerId') referrerId: string) {
+  async claimReferral(@Request() req: any, @Body('referrerId') referrerId?: string, @Body('code') code?: string) {
     const refereeId = req.user.id;
-    const referral = await this.referralService.linkReferral(refereeId, referrerId);
+    const finalReferrerId = referrerId || code;
+    if (!finalReferrerId) {
+      throw new BadRequestException('Referral code or referrerId is required.');
+    }
+    const referral = await this.referralService.linkReferral(refereeId, finalReferrerId);
     return {
       success: true,
       message: 'Referral linked successfully',

@@ -186,7 +186,7 @@ export class WalletService {
           type: 'credit',
           amount,
           reason,
-          relatedTransactionId: relatedTransactionId
+          relatedTransactionId: (relatedTransactionId && Types.ObjectId.isValid(relatedTransactionId))
             ? new Types.ObjectId(relatedTransactionId)
             : null,
           note: note || null,
@@ -231,7 +231,7 @@ export class WalletService {
           type: 'debit',
           amount,
           reason,
-          relatedTransactionId: relatedTransactionId
+          relatedTransactionId: (relatedTransactionId && Types.ObjectId.isValid(relatedTransactionId))
             ? new Types.ObjectId(relatedTransactionId)
             : null,
         }],

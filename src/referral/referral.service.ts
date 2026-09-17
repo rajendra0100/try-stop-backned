@@ -39,7 +39,13 @@ export class ReferralService {
       throw new ConflictException('You have already been referred by another user.');
     }
 
-    const referrer = await this.userModel.findById(referrerId);
+    let referrer: any = null;
+    if (Types.ObjectId.isValid(referrerId)) {
+      referrer = await this.userModel.findById(referrerId);
+    }
+    if (!referrer) {
+      referrer = await this.userModel.findOne({ phone: referrerId });
+    }
     if (!referrer) {
       throw new NotFoundException('Referrer user not found.');
     }
@@ -51,7 +57,7 @@ export class ReferralService {
       // 1. Create Pending Referral
       const referral = await this.referralModel.create(
         [{
-          referrerId: new Types.ObjectId(referrerId),
+          referrerId: referrer._id,
           refereeId: new Types.ObjectId(refereeId),
           status: 'pending',
           rewardAmount: 0,
@@ -62,7 +68,7 @@ export class ReferralService {
       // 2. Set referredBy cache on referee User
       await this.userModel.findByIdAndUpdate(
         refereeId,
-        { referredBy: new Types.ObjectId(referrerId) },
+        { referredBy: referrer._id },
         { session },
       );
 
@@ -164,7 +170,7 @@ export class ReferralService {
       // 2. Mark invite completed
       referral.status = 'completed';
       referral.rewardAmount = rewardAmount;
-      referral.firstPurchaseTransactionId = new Types.ObjectId(transactionId);
+      referral.firstPurchaseTransactionId = (transactionId && Types.ObjectId.isValid(transactionId)) ? new Types.ObjectId(transactionId) : null;
       referral.firstPurchaseAmount = purchaseAmount;
       await referral.save({ session });
 
@@ -176,7 +182,7 @@ export class ReferralService {
         await this.fcmNotificationService.sendToUser(
           referrerId,
           'Referral Reward Credited! 🎉',
-          `Congratulations! You earned ₹${rewardAmount} cashback because your friend made their first purchase.`,
+          `Congratulations! You earned ₹${rewardAmount} reward because your friend made their first purchase.`,
           { type: 'referral_completed', rewardAmount: rewardAmount.toString() },
         );
       } catch (fcmErr) {

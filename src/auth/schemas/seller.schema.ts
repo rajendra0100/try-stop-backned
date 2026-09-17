@@ -165,6 +165,11 @@ export class Seller {
       canViewShop?: boolean;
       canEditShop?: boolean;
       canManageProducts?: boolean;
+      canManageShop?: boolean;
+      canAccessDashboard?: boolean;
+      canManageCoupons?: boolean;
+      canSendBroadcast?: boolean;
+      canManageBroadcast?: boolean;
     };
     status: 'pending' | 'active';
     otp?: string;

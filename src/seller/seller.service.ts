@@ -900,6 +900,9 @@ export class SellerService {
         canManageStaff: Boolean(s.permissions?.canEditStaff ?? s.permissions?.canManageStaff ?? false),
         canManageShop: Boolean(s.permissions?.canManageShop ?? false),
         canAccessDashboard: Boolean(s.permissions?.canAccessDashboard ?? false),
+        canManageCoupons: Boolean(s.permissions?.canManageCoupons ?? false),
+        canSendBroadcast: Boolean(s.permissions?.canSendBroadcast ?? s.permissions?.canManageBroadcast ?? false),
+        canManageBroadcast: Boolean(s.permissions?.canManageBroadcast ?? s.permissions?.canSendBroadcast ?? false),
       },
       status: s.status || "active",
       addedAt: s.addedAt || new Date(),
@@ -1055,6 +1058,9 @@ export class SellerService {
         canManageStaff: Boolean(dto.canEditStaff ?? false),
         canManageShop: Boolean(dto.canManageShop ?? false),
         canAccessDashboard: Boolean(dto.canAccessDashboard ?? false),
+        canManageCoupons: Boolean(dto.canManageCoupons ?? false),
+        canSendBroadcast: Boolean(dto.canSendBroadcast ?? dto.canManageBroadcast ?? false),
+        canManageBroadcast: Boolean(dto.canManageBroadcast ?? dto.canSendBroadcast ?? false),
       },
       status: "active" as const,
       addedAt: new Date(),
@@ -1091,12 +1097,16 @@ export class SellerService {
           canManageStaff: Boolean(updatedStaff?.permissions?.canEditStaff ?? updatedStaff?.permissions?.canManageStaff ?? false),
           canManageShop: Boolean(updatedStaff?.permissions?.canManageShop ?? false),
           canAccessDashboard: Boolean(updatedStaff?.permissions?.canAccessDashboard ?? false),
+          canManageCoupons: Boolean(updatedStaff?.permissions?.canManageCoupons ?? false),
+          canSendBroadcast: Boolean(updatedStaff?.permissions?.canSendBroadcast ?? updatedStaff?.permissions?.canManageBroadcast ?? false),
+          canManageBroadcast: Boolean(updatedStaff?.permissions?.canManageBroadcast ?? updatedStaff?.permissions?.canSendBroadcast ?? false),
         },
-        status: "active",
-        addedAt: updatedStaff?.addedAt,
+        status: updatedStaff.status || "active",
+        addedAt: updatedStaff.addedAt,
       },
     };
   }
+
 
   /**
    * Resend onboarding verification OTP
@@ -1119,21 +1129,25 @@ export class SellerService {
 
     try {
       await this.notificationService.sendOtpViaEmail(cleanEmail, otp);
-      this.logger.log(`Resent staff onboarding OTP (${otp}) to ${cleanEmail}`);
+      this.logger.log(`Resent onboarding OTP (${otp}) to ${cleanEmail}`);
     } catch (err: any) {
-      this.logger.error(`Failed to resend staff OTP to ${cleanEmail}: ${err?.message}`);
+      this.logger.error(`Failed to resend staff onboarding OTP to ${cleanEmail}: ${err?.message}`);
     }
 
     return {
       success: true,
-      message: `A new verification OTP has been sent to ${cleanEmail}. Valid for 5 minutes.`,
+      message: `A new verification OTP has been sent to ${cleanEmail}`,
     };
   }
 
   /**
-   * Update staff member details (name, designation, permissions only — phone and email are immutable)
+   * Update staff member details & permissions
    */
-  async updateStaffMember(sellerId: string, staffId: string, dto: UpdateStaffDto) {
+  async updateStaffMember(
+    sellerId: string,
+    staffId: string,
+    dto: UpdateStaffDto,
+  ) {
     const seller = await this.sellerModel.findById(sellerId);
     if (!seller) {
       throw new NotFoundException("Seller not found");
@@ -1161,6 +1175,9 @@ export class SellerService {
             ...(dto.canManageStaff !== undefined && { canManageStaff: Boolean(dto.canManageStaff), canEditStaff: Boolean(dto.canManageStaff) }),
             ...(dto.canManageShop !== undefined && { canManageShop: Boolean(dto.canManageShop) }),
             ...(dto.canAccessDashboard !== undefined && { canAccessDashboard: Boolean(dto.canAccessDashboard) }),
+            ...(dto.canManageCoupons !== undefined && { canManageCoupons: Boolean(dto.canManageCoupons) }),
+            ...(dto.canSendBroadcast !== undefined && { canSendBroadcast: Boolean(dto.canSendBroadcast), canManageBroadcast: Boolean(dto.canSendBroadcast) }),
+            ...(dto.canManageBroadcast !== undefined && { canManageBroadcast: Boolean(dto.canManageBroadcast), canSendBroadcast: Boolean(dto.canManageBroadcast) }),
           },
         };
         return updatedStaff;
@@ -1193,6 +1210,9 @@ export class SellerService {
           canManageStaff: Boolean(updatedStaff?.permissions?.canEditStaff ?? updatedStaff?.permissions?.canManageStaff ?? false),
           canManageShop: Boolean(updatedStaff?.permissions?.canManageShop ?? false),
           canAccessDashboard: Boolean(updatedStaff?.permissions?.canAccessDashboard ?? false),
+          canManageCoupons: Boolean(updatedStaff?.permissions?.canManageCoupons ?? false),
+          canSendBroadcast: Boolean(updatedStaff?.permissions?.canSendBroadcast ?? updatedStaff?.permissions?.canManageBroadcast ?? false),
+          canManageBroadcast: Boolean(updatedStaff?.permissions?.canManageBroadcast ?? updatedStaff?.permissions?.canSendBroadcast ?? false),
         },
         status: updatedStaff.status || "active",
         addedAt: updatedStaff.addedAt,
@@ -1245,13 +1265,30 @@ export class SellerService {
     let updatedStaff: any = null;
     seller.staffMembers = (seller.staffMembers || []).map((s: any) => {
       const sId = s._id?.toString() || s.id;
-      if (sId === staffId) {
+      if (String(sId) === String(staffId)) {
+        const curPerms = s.permissions || {};
+        const newPerms = {
+          ...curPerms,
+          [permissionKey]: Boolean(value),
+        };
+        if (permissionKey === "canViewStaff" && !value) {
+          newPerms.canEditStaff = false;
+          newPerms.canManageStaff = false;
+        } else if (permissionKey === "canManageStaff" || permissionKey === "canEditStaff") {
+          newPerms.canManageStaff = Boolean(value);
+          newPerms.canEditStaff = Boolean(value);
+          if (value) newPerms.canViewStaff = true;
+        } else if ((permissionKey === "canViewProfile" || permissionKey === "canAccessProfile") && !value) {
+          newPerms.canViewProfile = false;
+          newPerms.canAccessProfile = false;
+          newPerms.canEditProfile = false;
+        } else if (permissionKey === "canSendBroadcast" || permissionKey === "canManageBroadcast") {
+          newPerms.canSendBroadcast = Boolean(value);
+          newPerms.canManageBroadcast = Boolean(value);
+        }
         updatedStaff = {
           ...s,
-          permissions: {
-            ...(s.permissions || {}),
-            [permissionKey]: Boolean(value),
-          },
+          permissions: newPerms,
         };
         return updatedStaff;
       }
@@ -1270,6 +1307,8 @@ export class SellerService {
       message: "Permission updated successfully",
       data: {
         _id: updatedStaff._id?.toString() || updatedStaff.id,
+        phone: updatedStaff.phone,
+        email: updatedStaff.email,
         name: updatedStaff.name,
         permissions: {
           canViewProfile: Boolean(updatedStaff?.permissions?.canViewProfile ?? updatedStaff?.permissions?.canAccessProfile ?? true),
@@ -1280,6 +1319,9 @@ export class SellerService {
           canManageStaff: Boolean(updatedStaff?.permissions?.canEditStaff ?? updatedStaff?.permissions?.canManageStaff ?? false),
           canManageShop: Boolean(updatedStaff?.permissions?.canManageShop ?? false),
           canAccessDashboard: Boolean(updatedStaff?.permissions?.canAccessDashboard ?? false),
+          canManageCoupons: Boolean(updatedStaff?.permissions?.canManageCoupons ?? false),
+          canSendBroadcast: Boolean(updatedStaff?.permissions?.canSendBroadcast ?? updatedStaff?.permissions?.canManageBroadcast ?? false),
+          canManageBroadcast: Boolean(updatedStaff?.permissions?.canManageBroadcast ?? updatedStaff?.permissions?.canSendBroadcast ?? false),
         },
       },
     };

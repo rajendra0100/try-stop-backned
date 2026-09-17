@@ -290,39 +290,59 @@ export class AuthService {
           : `Seller OTP login: ${identifier}`,
       );
 
-      return this.buildTokenResponse(seller._id.toString(), Role.SELLER, {
-        role: Role.SELLER,
-        isStaff: Boolean(isStaffLogin),
-        staffMember: staffMember
+      const staffMemberPayload = staffMember
+        ? {
+            _id: (staffMember as any)._id?.toString() || (staffMember as any).id || (staffMember as any)._id,
+            name: staffMember.name,
+            phone: staffMember.phone,
+            email: staffMember.email,
+            designation: staffMember.designation || 'Store Executive',
+            permissions: {
+              canViewProfile: Boolean((staffMember.permissions as any)?.canViewProfile ?? (staffMember.permissions as any)?.canAccessProfile ?? true),
+              canAccessProfile: Boolean((staffMember.permissions as any)?.canAccessProfile ?? (staffMember.permissions as any)?.canViewProfile ?? true),
+              canEditProfile: Boolean((staffMember.permissions as any)?.canEditProfile ?? false),
+              canViewStaff: Boolean((staffMember.permissions as any)?.canViewStaff ?? (staffMember.permissions as any)?.canManageStaff ?? false),
+              canEditStaff: Boolean((staffMember.permissions as any)?.canEditStaff ?? false),
+              canManageStaff: Boolean((staffMember.permissions as any)?.canEditStaff ?? (staffMember.permissions as any)?.canManageStaff ?? false),
+              canViewShop: Boolean((staffMember.permissions as any)?.canViewShop ?? (staffMember.permissions as any)?.canManageProducts ?? false),
+              canEditShop: Boolean((staffMember.permissions as any)?.canEditShop ?? false),
+              canManageProducts: Boolean((staffMember.permissions as any)?.canEditShop ?? (staffMember.permissions as any)?.canManageProducts ?? false),
+              canManageShop: Boolean((staffMember.permissions as any)?.canManageShop ?? false),
+              canAccessDashboard: Boolean((staffMember.permissions as any)?.canAccessDashboard ?? false),
+              canManageCoupons: Boolean((staffMember.permissions as any)?.canManageCoupons ?? false),
+              canSendBroadcast: Boolean((staffMember.permissions as any)?.canSendBroadcast ?? (staffMember.permissions as any)?.canManageBroadcast ?? false),
+              canManageBroadcast: Boolean((staffMember.permissions as any)?.canManageBroadcast ?? (staffMember.permissions as any)?.canSendBroadcast ?? false),
+            },
+          }
+        : null;
+
+      return this.buildTokenResponse(
+        seller._id.toString(),
+        Role.SELLER,
+        {
+          role: Role.SELLER,
+          isStaff: Boolean(isStaffLogin),
+          staffMember: staffMemberPayload,
+          permissions: staffMemberPayload?.permissions || undefined,
+          name: isStaffLogin ? staffMember?.name : seller.ownerName,
+          phone: isStaffLogin ? staffMember?.phone : seller.phone,
+          shopName: seller.shopName,
+          ownerName: seller.ownerName,
+          email: seller.email,
+          shopLogoUrl: seller.shopLogoUrl,
+          shopCoverUrl: seller.shopCoverUrl,
+          shopBannerUrl: seller.shopBannerUrl,
+          shopImages: seller.shopImages || [],
+          verificationStatus: seller.verificationStatus,
+        },
+        isStaffLogin && staffMember
           ? {
-              _id: (staffMember as any)._id?.toString() || (staffMember as any).id || (staffMember as any)._id,
-              name: staffMember.name,
-              phone: staffMember.phone,
-              email: staffMember.email,
-              designation: staffMember.designation || 'Store Executive',
-              permissions: {
-                canViewProfile: Boolean((staffMember.permissions as any)?.canViewProfile ?? (staffMember.permissions as any)?.canAccessProfile ?? true),
-                canAccessProfile: Boolean((staffMember.permissions as any)?.canAccessProfile ?? (staffMember.permissions as any)?.canViewProfile ?? true),
-                canEditProfile: Boolean((staffMember.permissions as any)?.canEditProfile ?? false),
-                canViewStaff: Boolean((staffMember.permissions as any)?.canViewStaff ?? (staffMember.permissions as any)?.canManageStaff ?? false),
-                canEditStaff: Boolean((staffMember.permissions as any)?.canEditStaff ?? false),
-                canManageStaff: Boolean((staffMember.permissions as any)?.canEditStaff ?? (staffMember.permissions as any)?.canManageStaff ?? false),
-                canViewShop: Boolean((staffMember.permissions as any)?.canViewShop ?? (staffMember.permissions as any)?.canManageProducts ?? false),
-                canEditShop: Boolean((staffMember.permissions as any)?.canEditShop ?? false),
-                canManageProducts: Boolean((staffMember.permissions as any)?.canEditShop ?? (staffMember.permissions as any)?.canManageProducts ?? false),
-              },
+              isStaff: true,
+              staffId: (staffMember as any)._id?.toString() || (staffMember as any).id,
+              staffPhone: staffMember.phone,
             }
-          : null,
-        shopName: seller.shopName,
-        ownerName: seller.ownerName,
-        email: seller.email,
-        phone: seller.phone,
-        shopLogoUrl: seller.shopLogoUrl,
-        shopCoverUrl: seller.shopCoverUrl,
-        shopBannerUrl: seller.shopBannerUrl,
-        shopImages: seller.shopImages || [],
-        verificationStatus: seller.verificationStatus,
-      });
+          : undefined,
+      );
     }
 
     if (forRole === 'seller') {
@@ -453,7 +473,7 @@ export class AuthService {
     });
   }
 
-  async getProfile(userId: string) {
+  async getProfile(userId: string, isStaff?: boolean, staffId?: string, staffPhone?: string) {
     let user: any = await this.userModel.findById(userId);
     if (!user) {
       user = await this.sellerModel.findById(userId);
@@ -463,6 +483,61 @@ export class AuthService {
     }
 
     if (user.role === Role.SELLER || user.shopName) {
+      if ((isStaff || staffId || staffPhone) && Array.isArray(user.staffMembers)) {
+        const staffMember = (user.staffMembers || []).find(
+          (s: any) =>
+            (staffId && (String(s._id) === String(staffId) || String(s.id) === String(staffId))) ||
+            (staffPhone && s.phone === staffPhone),
+        );
+        if (staffMember) {
+          const permissions = {
+            canViewProfile: Boolean(staffMember?.permissions?.canViewProfile ?? staffMember?.permissions?.canAccessProfile ?? true),
+            canAccessProfile: Boolean(staffMember?.permissions?.canAccessProfile ?? staffMember?.permissions?.canViewProfile ?? true),
+            canEditProfile: Boolean(staffMember?.permissions?.canEditProfile ?? false),
+            canViewStaff: Boolean(staffMember?.permissions?.canViewStaff ?? staffMember?.permissions?.canManageStaff ?? false),
+            canEditStaff: Boolean(staffMember?.permissions?.canEditStaff ?? false),
+            canManageStaff: Boolean(staffMember?.permissions?.canEditStaff ?? staffMember?.permissions?.canManageStaff ?? false),
+            canManageShop: Boolean(staffMember?.permissions?.canManageShop ?? false),
+            canAccessDashboard: Boolean(staffMember?.permissions?.canAccessDashboard ?? false),
+            canManageCoupons: Boolean(staffMember?.permissions?.canManageCoupons ?? false),
+            canSendBroadcast: Boolean(staffMember?.permissions?.canSendBroadcast ?? staffMember?.permissions?.canManageBroadcast ?? false),
+            canManageBroadcast: Boolean(staffMember?.permissions?.canManageBroadcast ?? staffMember?.permissions?.canSendBroadcast ?? false),
+          };
+
+          return {
+            success: true,
+            message: "Staff profile retrieved successfully",
+            user: {
+              _id: user._id,
+              role: Role.SELLER,
+              isStaff: true,
+              staffMember: {
+                _id: staffMember._id?.toString() || staffMember.id,
+                name: staffMember.name,
+                phone: staffMember.phone,
+                email: staffMember.email,
+                designation: staffMember.designation || "Store Executive",
+                profilePhotoUrl: staffMember.profilePhotoUrl || "",
+                permissions,
+              },
+              permissions,
+              name: staffMember.name,
+              staffName: staffMember.name,
+              phone: staffMember.phone,
+              email: staffMember.email,
+              profilePhotoUrl: staffMember.profilePhotoUrl || "",
+              shopName: user.shopName,
+              ownerName: user.ownerName,
+              shopLogoUrl: user.shopLogoUrl,
+              shopCoverUrl: user.shopCoverUrl,
+              shopBannerUrl: user.shopBannerUrl,
+              shopImages: user.shopImages || [],
+              verificationStatus: user.verificationStatus,
+              staffMembers: user.staffMembers || [],
+            },
+          };
+        }
+      }
       let avgRating = Number(user.avgRating) || 0;
       let reviewCount = Number(user.reviewCount) || 0;
 
@@ -1244,8 +1319,9 @@ export class AuthService {
     id: string,
     role: Role,
     userFields: object,
+    tokenPayloadExtra?: Record<string, any>,
   ): object {
-    const payload = { sub: id, role };
+    const payload = { sub: id, role, ...(tokenPayloadExtra || {}) };
 
     const accessToken = this.jwtService.sign(payload, {
       secret: this.configService.get<string>('JWT_ACCESS_SECRET'),

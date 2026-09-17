@@ -48,9 +48,12 @@ export class UserAuthController {
   /** Fetch profile details for authenticated user */
   @Get('profile')
   @UseGuards(JwtAuthGuard)
-  async getProfile(@CurrentUser() user: any) {
+  async getProfile(@CurrentUser() user: any, @Req() req: any) {
     const userId = user.id || user._id?.toString() || user.sub;
-    return this.authService.getProfile(userId);
+    const isStaff = Boolean(user.isStaff || req?.headers?.['x-is-staff'] === 'true');
+    const staffId = user.staffId || req?.headers?.['x-staff-id'];
+    const staffPhone = user.staffPhone || req?.headers?.['x-staff-phone'];
+    return this.authService.getProfile(userId, isStaff, staffId, staffPhone);
   }
 
   /** Step 3 — Update profile details (optional, user-level) */

@@ -62,6 +62,18 @@ export class OnboardStaffDto {
   @IsOptional()
   @IsBoolean()
   canAccessDashboard?: boolean;
+  @IsOptional()
+  @IsBoolean()
+  canManageCoupons?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  canSendBroadcast?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  canManageBroadcast?: boolean;
+
 
 }
 
@@ -122,6 +134,17 @@ export class VerifyStaffOtpDto {
   @IsOptional()
   @IsBoolean()
   canAccessDashboard?: boolean;
+  @IsOptional()
+  @IsBoolean()
+  canManageCoupons?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  canSendBroadcast?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  canManageBroadcast?: boolean;
 
 }
 
@@ -180,6 +203,17 @@ export class UpdateStaffDto {
   @IsOptional()
   @IsBoolean()
   canAccessDashboard?: boolean;
+  @IsOptional()
+  @IsBoolean()
+  canManageCoupons?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  canSendBroadcast?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  canManageBroadcast?: boolean;
 
 }
 
